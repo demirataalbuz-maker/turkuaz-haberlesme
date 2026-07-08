@@ -1,5 +1,5 @@
-// Turkuaz arayüzü — localhost'taki kendi sunucumuza WebSocket ile bağlanır.
-let ws = null
+// Turkuaz arayüzü. Taşıma katmanı (WebSocket / mobil köprü) transport.js'te;
+// UI sadece window.send() ve Transport.onMessage() üzerinden konuşur.
 let state = { me: { name: '', code: '', avatar: '', status: '' }, friends: [], requests: [], rooms: [], pending: {} }
 let activeConv = null            // { type:'dm', code } | { type:'room', topic }
 const activeChs = {}             // topic -> kanal adı
@@ -11,10 +11,8 @@ const $ = (id) => document.getElementById(id)
 const QUICK_EMOJI = ['👍', '❤️', '😂', '🔥', '😮']
 const AVATARS = ['😀', '😎', '🦊', '🐱', '🐼', '🦁', '🐸', '👾', '🤖', '🐙', '🦄', '🐺', '🦅', '🐍', '⚡', '🌊', '🌙', '⭐', '🎮', '🎧', '⚔️', '🛡️', '🧿', '🍉']
 
-function connect () {
-  ws = new WebSocket('ws://' + location.host)
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data)
+// Gelen mesajları işle — taşıma (WebSocket / mobil köprü) transport.js'te.
+Transport.onMessage((m) => {
     switch (m.t) {
       case 'state': state = m; render(); break
       case 'history':
@@ -37,10 +35,8 @@ function connect () {
       case 'rtc': if (window.Voice) Voice.onRtc(m); break
       case 'room-ev': onRoomEv(m); break
     }
-  }
-  ws.onclose = () => setTimeout(connect, 1500)
-}
-function send (obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)) }
+})
+// send() ve Transport transport.js'te tanımlı (window.send / window.Transport).
 
 function convId () {
   if (!activeConv) return null
@@ -623,5 +619,5 @@ document.addEventListener('click', function askNotif () {
   document.removeEventListener('click', askNotif)
 }, { once: true })
 
-connect()
+Transport.start()
 renderMessages()
