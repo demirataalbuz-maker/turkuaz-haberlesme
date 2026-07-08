@@ -51,8 +51,8 @@ Ortam değişkenleri: `PORT` (3210), `TURKUAZ_DATA` (veri klasörü),
 
 ```bash
 # Node.js 20+ kurulu olsun, sonra:
-git clone https://github.com/demomeister/turkuaz.git
-cd turkuaz
+git clone https://github.com/demirataalbuz-maker/turkuaz-haberlesme.git
+cd turkuaz-haberlesme
 npm install
 npm start              # tarayıcıdan http://localhost:3210
 # masaüstü uygulaması istersen:
