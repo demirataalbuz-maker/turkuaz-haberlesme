@@ -1,0 +1,45 @@
+# Turkuaz sürüm derleme: bir sürüm etiketi (ör. v0.3.2) push'landığında
+# Windows (.exe) ve Linux (AppImage) paketlerini KENDİ işletim sistemlerinde
+# derler ve GitHub Release'e (taslak) yükler. Sonra release'i elle "Publish"
+# edince oto-update bütün kurulumlara dağıtır.
+#
+# Kullanım:
+#   npm version patch        # sürümü yükseltir + git tag oluşturur (vX.Y.Z)
+#   git push --follow-tags    # tag'i push'la → bu akış tetiklenir
+# (ya da GitHub'da Actions sekmesinden "Run workflow" ile elle.)
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write        # GITHUB_TOKEN'ın release oluşturup dosya yükleyebilmesi için
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bağımlılıkları kur
+        run: npm ci
+
+      - name: Derle ve yayınla (kendi OS hedefi)
+        # Platform bayrağı yok: electron-builder çalıştığı OS'un hedefini derler
+        # (ubuntu → AppImage, windows → nsis .exe). Her ikisi de aynı sürüm
+        # etiketli taslak release'e yüklenir.
+        run: npx --no-install electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

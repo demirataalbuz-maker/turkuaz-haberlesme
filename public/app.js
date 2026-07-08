@@ -243,7 +243,7 @@ function renderChatHead () {
     sub.textContent = r.online + ' kişi çevrimiçi' + (r.isOwner ? ' · odanın sahibisin' : '')
     const copy = document.createElement('button')
     copy.textContent = 'Davet kodunu kopyala'
-    copy.onclick = () => { navigator.clipboard.writeText(r.invite); copy.textContent = 'Kopyalandı ✓'; setTimeout(() => { copy.textContent = 'Davet kodunu kopyala' }, 1500) }
+    copy.onclick = () => copyText(r.invite, copy, 'Kopyalandı ✓', 'Davet kodunu kopyala')
     const leave = document.createElement('button')
     leave.textContent = 'Ayrıl'
     leave.onclick = () => {
@@ -480,12 +480,28 @@ function openProfile () {
   showModal('modal-profile')
 }
 
-// ---- olaylar ----
-$('btn-copy-code').onclick = () => {
-  navigator.clipboard.writeText(state.me.code)
-  $('btn-copy-code').textContent = '✓'
-  setTimeout(() => { $('btn-copy-code').textContent = '⧉' }, 1500)
+// Panoya yaz; API reddederse (izin/odak) gizli textarea yöntemine düş.
+// Butona gerçek sonucu yansıt — başarısızken "Kopyalandı" deme.
+async function copyText (text, btn, ok, back) {
+  let done = true
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try { done = document.execCommand('copy') } catch { done = false }
+    ta.remove()
+  }
+  btn.textContent = done ? ok : 'Kopyalanamadı!'
+  setTimeout(() => { btn.textContent = back }, 1500)
 }
+
+// ---- olaylar ----
+$('btn-copy-code').onclick = () => copyText(state.me.code, $('btn-copy-code'), '✓', '⧉')
 $('btn-add-friend').onclick = () => {
   const code = $('friend-code-input').value.trim()
   if (code) { send({ t: 'add-friend', code }); $('friend-code-input').value = '' }
@@ -592,11 +608,7 @@ function renderSearchResults (m) {
 // hesap taşıma
 $('btn-transfer').onclick = () => { $('export-box').value = ''; $('import-box').value = ''; send({ t: 'export' }); showModal('modal-transfer') }
 $('btn-close-transfer').onclick = () => hideModal('modal-transfer')
-$('btn-copy-export').onclick = () => {
-  navigator.clipboard.writeText($('export-box').value)
-  $('btn-copy-export').textContent = 'Kopyalandı ✓'
-  setTimeout(() => { $('btn-copy-export').textContent = 'Kopyala' }, 1500)
-}
+$('btn-copy-export').onclick = () => copyText($('export-box').value, $('btn-copy-export'), 'Kopyalandı ✓', 'Kopyala')
 $('btn-do-import').onclick = () => {
   try {
     const data = JSON.parse(decodeURIComponent(escape(atob($('import-box').value.trim()))))

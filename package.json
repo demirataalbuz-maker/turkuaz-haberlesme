@@ -1,13 +1,15 @@
 {
   "name": "turkuaz",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "main": "electron-main.js",
   "scripts": {
     "start": "node server.js",
     "app": "electron .",
-    "dist": "electron-builder --linux AppImage dir",
-    "test": "node test/e2e.js"
+    "dist": "electron-builder --linux AppImage dir --publish never",
+    "release": "electron-builder --publish always",
+    "test": "node test/e2e.js",
+    "test:av": "node test/av.js"
   },
   "build": {
     "appId": "dev.turkuaz.app",
@@ -20,12 +22,35 @@
       "build/icon.png"
     ],
     "linux": {
-      "target": ["AppImage", "dir"],
+      "target": [
+        "AppImage",
+        "dir"
+      ],
       "category": "Network",
       "icon": "build/icon.png"
-    }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Turkuaz-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "demirataalbuz-maker",
+        "repo": "turkuaz-haberlesme"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "express": "^4.19.2",
     "hyperdht": "^6.15.0",
     "hyperswarm": "^4.8.0",

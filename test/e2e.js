@@ -11,7 +11,7 @@ const WebSocket = require('ws')
 
 const ROOT = path.join(__dirname, '..')
 const TMP = path.join(__dirname, 'tmp')
-const BOOTSTRAP_PORT = 49737
+const BOOTSTRAP_PORT = parseInt(process.env.TEST_BOOTSTRAP_PORT || '49737', 10)
 
 fs.rmSync(TMP, { recursive: true, force: true })
 fs.mkdirSync(TMP, { recursive: true })

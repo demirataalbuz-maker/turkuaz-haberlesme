@@ -1,7 +1,7 @@
 // Turkuaz masaüstü uygulaması: server.js'i aynı süreçte başlatır ve
 // arayüzü bir pencerede açar. Pencere kapatılınca tepsiye küçülür,
 // mesajlar gelmeye devam eder.
-const { app, BrowserWindow, session, Tray, Menu, desktopCapturer } = require('electron')
+const { app, BrowserWindow, session, Tray, Menu, desktopCapturer, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const net = require('net')
@@ -31,12 +31,66 @@ function portInUse (port) {
 let win = null
 let tray = null
 let quitting = false
+let updateReady = null // indirilen sürüm no'su (tepsi menüsünde gösterilir)
+
+function trayMenu () {
+  const items = [
+    { label: 'Turkuaz\'ı Göster', click: () => { win.show(); win.focus() } }
+  ]
+  if (updateReady) {
+    items.push(
+      { type: 'separator' },
+      {
+        label: 'v' + updateReady + ' güncellemesini kur (yeniden başlar)',
+        click: () => { require('electron-updater').autoUpdater.quitAndInstall() }
+      }
+    )
+  }
+  items.push(
+    { type: 'separator' },
+    { label: 'Çıkış', click: () => { quitting = true; app.quit() } }
+  )
+  return Menu.buildFromTemplate(items)
+}
+
+// Otomatik güncelleme: yalnızca AppImage olarak paketliyken çalışır.
+// Feed = GitHub Releases (latest-linux.yml + AppImage); TURKUAZ_UPDATE_URL
+// ile kendi feed'ine yönlendirebilirsin. İndirilen dosya sha512 ile doğrulanır,
+// kurulum uygulama kapanırken yapılır (autoInstallOnAppQuit).
+function setupAutoUpdate () {
+  if (!app.isPackaged || !process.env.APPIMAGE) return
+  let autoUpdater
+  try { ({ autoUpdater } = require('electron-updater')) } catch { return }
+  const testMode = !!process.env.TURKUAZ_UPDATE_TEST
+  if (process.env.TURKUAZ_UPDATE_URL) {
+    autoUpdater.setFeedURL({ provider: 'generic', url: process.env.TURKUAZ_UPDATE_URL })
+  }
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = info.version
+    console.log('güncelleme indirildi: v' + info.version)
+    if (tray) { tray.setContextMenu(trayMenu()); tray.setToolTip('Turkuaz — v' + info.version + ' güncellemesi hazır') }
+    if (testMode) { autoUpdater.quitAndInstall() ; return }
+    try {
+      new Notification({
+        title: 'Turkuaz güncellemesi hazır',
+        body: 'v' + info.version + ' indirildi — uygulamayı kapatınca kurulur. Tepsiden hemen de kurabilirsin.'
+      }).show()
+    } catch {}
+  })
+  autoUpdater.on('error', (e) => { if (testMode) console.log('güncelleme hatası:', String(e)) }) // çevrimdışı vs. — sessiz geç
+  const check = () => autoUpdater.checkForUpdates().catch(() => {})
+  setTimeout(check, testMode ? 2000 : 15000)       // açılışta ağı hemen yorma
+  setInterval(check, 4 * 60 * 60 * 1000)           // sonra 4 saatte bir
+}
 
 async function start () {
   await app.whenReady()
 
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
-    cb(['media', 'notifications', 'display-capture'].includes(permission))
+    // clipboard-sanitized-write olmadan navigator.clipboard.writeText reddedilir
+    cb(['media', 'notifications', 'display-capture', 'clipboard-sanitized-write'].includes(permission))
   })
   // Ekran paylaşımında birincil ekranı ver (kendi seçim arayüzümüz yok)
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
@@ -71,13 +125,11 @@ async function start () {
   try {
     tray = new Tray(iconPath)
     tray.setToolTip('Turkuaz — çalışıyor')
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Turkuaz\'ı Göster', click: () => { win.show(); win.focus() } },
-      { type: 'separator' },
-      { label: 'Çıkış', click: () => { quitting = true; app.quit() } }
-    ]))
+    tray.setContextMenu(trayMenu())
     tray.on('click', () => { win.show(); win.focus() })
   } catch {}
+
+  setupAutoUpdate()
 
   // Otomatik test kancası: ilk odaya girip sesli sohbete katılır,
   // WebRTC bağlantı durumunu rapor dosyasına yazar ve çıkar.

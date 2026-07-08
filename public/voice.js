@@ -5,7 +5,15 @@
 
 const RTC_CFG = {
   // STUN sadece "dış IP'm ne?" der; üzerinden veri akmaz. Aynı ağda hiç kullanılmaz.
-  iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    { urls: ['stun:stun.cloudflare.com:3478'] }
+  ]
+}
+// CGNAT / simetrik NAT arkasında STUN yetmez; kullanıcı veri klasörüne
+// ice.json koyarsa (TURN dahil) onu kullan — server state ile gönderir.
+function rtcConfig () {
+  return (Array.isArray(state.ice) && state.ice.length) ? { iceServers: state.ice } : RTC_CFG
 }
 const LR_SCALE = 8
 
@@ -179,7 +187,7 @@ const Voice = {
   },
 
   createPC (m) {
-    const pc = new RTCPeerConnection(RTC_CFG)
+    const pc = new RTCPeerConnection(rtcConfig())
     m.pc = pc
     for (const track of this.mic.getTracks()) pc.addTrack(track, this.mic)
     if (this.cam) pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
@@ -187,6 +195,11 @@ const Voice = {
 
     pc.onicecandidate = (e) => this.sendRtc(m.code, { kind: 'ice', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
+      // Açılış glare'ini kökten önle: iki taraf da aynı anda teklif atarsa
+      // kibar tarafın rollback'i sonrası Chromium'da ICE toplama takılabiliyor.
+      // Kibar taraf İLK teklifi hiç atmaz — parçaları zaten answer'a biner;
+      // sonradan gerekirse (remoteDescription varken) teklif atabilir.
+      if (m.polite && !pc.remoteDescription) return
       try {
         m.makingOffer = true
         await pc.setLocalDescription()
@@ -204,8 +217,14 @@ const Voice = {
       this.refreshMedia(m)
     }
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) this.removeMember(m.code)
-      else this.sync()
+      const st = pc.connectionState
+      if (st === 'connected') m.restarted = false
+      if (st === 'failed') {
+        // İlk çare: aynı bağlantıda ICE'ı tazele; ikinci kez düşerse üyeyi çıkar
+        // (karşı tarafın 8 sn'lik durum kalp atışı üyeyi yeniden kurar = tekrar dene)
+        if (!m.restarted) { m.restarted = true; try { pc.restartIce() } catch { this.removeMember(m.code); return } } else { this.removeMember(m.code); return }
+      } else if (st === 'closed') { this.removeMember(m.code); return }
+      this.sync()
     }
   },
 
@@ -420,7 +439,11 @@ const Voice = {
     if (!activeConv || activeConv.type !== 'room' || activeConv.topic !== this.room) return
     if (!m.bubble || !m.bubble.isConnected) m.bubble = this.makeBubble(m.code, m.name, m.avatar, false)
     this.positionBubble(m)
-    m.bubble.querySelector('.lr-name').textContent = m.name + (m.muted ? ' 🔇' : '')
+    // Medya bağlantısı kurulana kadar ⏳, koparsa ⚠️ — "ses/görüntü niye yok"u görünür kıl
+    const st = m.pc.connectionState
+    const mark = st === 'connected' ? '' : (st === 'failed' || st === 'disconnected' ? ' ⚠️' : ' ⏳')
+    m.bubble.title = mark ? 'medya bağlantısı: ' + st + ' — NAT/güvenlik duvarı engelliyor olabilir (README: ice.json)' : ''
+    m.bubble.querySelector('.lr-name').textContent = m.name + (m.muted ? ' 🔇' : '') + mark
     const face = m.bubble.querySelector('.lr-face')
     const vid = m.bubble.querySelector('video')
     const main = this.mainStream(m)
@@ -555,19 +578,27 @@ const CallMgr = {
     document.getElementById('call-widget').classList.remove('hidden')
     document.getElementById('call-name').textContent = this.peerName
     this.timeInt = setInterval(() => {
+      const el = document.getElementById('call-time')
+      const st = this.pc ? this.pc.connectionState : ''
+      if (st && st !== 'connected') {
+        el.textContent = (st === 'failed' || st === 'disconnected') ? 'bağlantı sorunu ⚠️' : 'bağlanıyor…'
+        return
+      }
       const s = Math.floor((Date.now() - this.t0) / 1000)
-      document.getElementById('call-time').textContent =
+      el.textContent =
         String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
     }, 1000)
     this.renderVideos()
   },
 
   makePC () {
-    const pc = new RTCPeerConnection(RTC_CFG)
+    const pc = new RTCPeerConnection(rtcConfig())
     this.pc = pc
     for (const t of this.mic.getTracks()) pc.addTrack(t, this.mic)
     pc.onicecandidate = (e) => this.sendRtc(this.peer, { kind: 'ice', scope: 'call', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
+      // Oda tarafındaki glare önlemiyle aynı: kibar taraf ilk teklifi beklesin
+      if (this.polite && !pc.remoteDescription) return
       try {
         this.makingOffer = true
         await pc.setLocalDescription()
@@ -590,7 +621,11 @@ const CallMgr = {
       this.renderVideos()
     }
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) this.cleanup()
+      const st = pc.connectionState
+      if (st === 'connected') this._restarted = false
+      if (st === 'failed') {
+        if (!this._restarted) { this._restarted = true; try { pc.restartIce() } catch { this.cleanup() } } else this.cleanup()
+      } else if (st === 'closed') this.cleanup()
     }
   },
 
@@ -688,6 +723,7 @@ const CallMgr = {
     this.streams = {}
     this.remoteScreenSid = null
     this.mutedFlag = false
+    this._restarted = false
     this.state = null
     this.peer = null
     document.getElementById('call-widget').classList.add('hidden')

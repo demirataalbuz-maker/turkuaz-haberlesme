@@ -41,6 +41,34 @@ let filesIdx = store.loadFiles()    // fid -> { fname, mime, size }
 
 for (const r of rooms) if (!r.channels) r.channels = ['genel']
 
+// Varsayılan ICE: çoklu STUN + ücretsiz public TURN röle. Farklı ağlardaki iki
+// PC arasında (simetrik NAT / CGNAT) doğrudan WebRTC kurulamayabilir; TURN bu
+// durumda SON ÇARE olarak devreye girer. Aynı ağdaki / koni-NAT'lı peer'lar yine
+// doğrudan bağlanır (röleye düşmez). Medya DTLS-SRTP ile uçtan uca şifreli
+// olduğundan röle içeriği göremez — yalnızca IP + şifreli trafik. Kapatmak için
+// TURKUAZ_NO_DEFAULT_TURN=1, kendi sunucunu koymak için ice.json / TURKUAZ_ICE.
+const DEFAULT_ICE = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turns:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+]
+
+// Özel ICE sunucuları: veri klasörüne ice.json koy ya da TURKUAZ_ICE ver —
+// RTCPeerConnection iceServers biçiminde bir dizi. Varsa varsayılanı geçersiz kılar.
+let iceServers = null
+try {
+  const raw = process.env.TURKUAZ_ICE || (fs.existsSync(path.join(DATA, 'ice.json')) && fs.readFileSync(path.join(DATA, 'ice.json'), 'utf8'))
+  if (raw) {
+    const parsed = JSON.parse(raw)
+    iceServers = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.iceServers) ? parsed.iceServers : null)
+  }
+} catch (e) { console.error('ice.json okunamadı:', e.message) }
+if (iceServers) console.log('Özel ICE sunucuları aktif (' + iceServers.length + ' kayıt)')
+else if (!process.env.TURKUAZ_NO_DEFAULT_TURN) { iceServers = DEFAULT_ICE; console.log('Varsayılan ICE (STUN + public TURN röle) aktif') }
+else console.log('TURN devre dışı (yalnızca doğrudan bağlantı)')
+
 const seen = new Map()
 function seenSet (conv) {
   if (!seen.has(conv)) seen.set(conv, store.messageIds(conv))
@@ -615,7 +643,8 @@ function stateObj () {
       channels: r.channels, banned: r.mod ? r.mod.banned : [],
       online: p2p.roomPeerCount(r.topic)
     })),
-    pending: Object.fromEntries(Object.entries(outbox).map(([k, v]) => [k, v.map(m => m.ack)]))
+    pending: Object.fromEntries(Object.entries(outbox).map(([k, v]) => [k, v.map(m => m.ack)])),
+    ice: iceServers || undefined
   }
 }
 
