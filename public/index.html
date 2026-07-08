@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turkuaz</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- Sol ray: logo + odalar -->
+  <nav id="rail">
+    <div class="rail-logo" id="btn-home" title="Arkadaşlar">
+      <svg viewBox="0 0 48 48" width="30" height="30"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs><text x="24" y="34" font-family="Arial" font-size="30" font-weight="900" fill="url(#lg)" text-anchor="middle">T</text></svg>
+    </div>
+    <div class="rail-sep"></div>
+    <div id="rail-rooms"></div>
+    <div class="rail-btn add" id="btn-add-room" title="Oda kur / katıl">+</div>
+  </nav>
+
+  <!-- Orta kolon -->
+  <aside id="sidebar">
+    <header id="sidebar-head">
+      <span class="wordmark">turkuaz</span>
+      <span class="p2p-badge">P2P</span>
+      <button id="btn-search" title="Mesajlarda ara (Ctrl+K)">⌕</button>
+    </header>
+    <div id="sidebar-body">
+      <div class="section-title">KODUM</div>
+      <div id="my-code-box">
+        <code id="my-code">...</code>
+        <button id="btn-copy-code" title="Kopyala">⧉</button>
+      </div>
+      <div class="section-title">ARKADAŞ EKLE</div>
+      <div id="add-friend-row">
+        <input id="friend-code-input" placeholder="arkadaş kodunu yapıştır" spellcheck="false">
+        <button id="btn-add-friend">Ekle</button>
+      </div>
+      <div id="requests-wrap">
+        <div class="section-title">GELEN İSTEKLER</div>
+        <div id="requests"></div>
+      </div>
+      <div class="section-title">DİREKT MESAJLAR</div>
+      <div id="dm-list"></div>
+    </div>
+    <footer id="me-card">
+      <div class="avatar" id="me-avatar">?</div>
+      <div class="me-info">
+        <div id="me-name">...</div>
+        <div class="me-sub" id="me-status">çevrimiçi</div>
+      </div>
+      <button id="btn-transfer" title="Hesabı taşı (dışa/içe aktar)">⇄</button>
+      <button id="btn-edit-profile" title="Profili düzenle">✎</button>
+    </footer>
+  </aside>
+
+  <!-- Ana panel -->
+  <main id="chat">
+    <header id="chat-head">
+      <span id="chat-title">Turkuaz'a hoş geldin</span>
+      <span id="chat-sub"></span>
+      <span id="chat-actions"></span>
+    </header>
+    <div id="channel-tabs" class="hidden"></div>
+
+    <!-- Oturma odası -->
+    <div id="livingroom" class="hidden">
+      <div id="lr-stage">
+        <div id="lr-overlay">
+          <button id="btn-voice-join">🎧 Sesli sohbete katıl</button>
+          <div id="lr-who"></div>
+        </div>
+      </div>
+      <div id="lr-controls" class="hidden">
+        <span class="lr-hint">🛋️ Balonunu sürükle — sesler bulunduğun yönden gelir</span>
+        <button id="btn-mic">🎙️ Sustur</button>
+        <button id="btn-cam">📷 Kamera</button>
+        <button id="btn-screen">🖥️ Ekran paylaş</button>
+        <button id="btn-voice-leave" class="danger">📞 Ayrıl</button>
+      </div>
+    </div>
+
+    <!-- Ekran paylaşımı sahnesi -->
+    <div id="theater" class="hidden">
+      <video id="theater-video" autoplay playsinline muted></video>
+      <div id="theater-label"></div>
+    </div>
+
+    <div id="messages"></div>
+    <div id="typing-bar"></div>
+    <div id="composer">
+      <button id="btn-attach" title="Dosya gönder">＋</button>
+      <input id="msg-input" placeholder="Mesaj yaz..." autocomplete="off" disabled>
+    </div>
+  </main>
+</div>
+
+<!-- DM arama widget'ı -->
+<div id="call-widget" class="hidden">
+  <div id="call-head">
+    <span id="call-name"></span>
+    <span id="call-time"></span>
+  </div>
+  <div id="call-videos">
+    <video id="call-remote" autoplay playsinline muted></video>
+    <video id="call-local" autoplay playsinline muted></video>
+  </div>
+  <div id="call-btns">
+    <button id="call-mute">🎙️</button>
+    <button id="call-cam">📷</button>
+    <button id="call-screen">🖥️</button>
+    <button id="call-end" class="danger">📞</button>
+  </div>
+</div>
+
+<!-- Gelen arama modalı -->
+<div class="modal-back hidden" id="modal-ring">
+  <div class="modal ring">
+    <div class="ring-avatar" id="ring-avatar">📞</div>
+    <h2 id="ring-name">...</h2>
+    <p id="ring-sub">seni arıyor...</p>
+    <div class="modal-btns center">
+      <button class="round-btn accept" id="btn-ring-accept">✓</button>
+      <button class="round-btn reject" id="btn-ring-reject">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profil modalı -->
+<div class="modal-back hidden" id="modal-profile">
+  <div class="modal">
+    <h2>Profil</h2>
+    <p>Bu bilgiler sadece bağlandığın kişilere gider — ortada sunucu yok.</p>
+    <div class="section-title">İSİM</div>
+    <input id="profile-name" placeholder="kullanıcı adın" maxlength="32">
+    <div class="section-title">AVATAR</div>
+    <div id="avatar-grid"></div>
+    <div class="section-title">DURUM</div>
+    <input id="profile-status" placeholder="ne yapıyorsun? (isteğe bağlı)" maxlength="60">
+    <div class="modal-btns">
+      <button class="primary" id="btn-save-profile">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Oda modalı -->
+<div class="modal-back hidden" id="modal-room">
+  <div class="modal">
+    <h2>Oda</h2>
+    <p>Yeni oda kur, davet kodunu arkadaşlarına gönder — ya da gelen kodla katıl.</p>
+    <div class="section-title">YENİ ODA KUR</div>
+    <input id="room-name-input" placeholder="oda adı" maxlength="32">
+    <div class="modal-btns"><button class="primary" id="btn-create-room">Kur</button></div>
+    <div class="section-title">DAVET KODUYLA KATIL</div>
+    <input id="room-code-input" placeholder="davet kodu" spellcheck="false">
+    <div class="modal-btns">
+      <button id="btn-close-room-modal">Vazgeç</button>
+      <button class="primary" id="btn-join-room">Katıl</button>
+    </div>
+  </div>
+</div>
+
+<!-- Arama (mesajlarda) -->
+<div class="modal-back hidden" id="modal-search">
+  <div class="modal search">
+    <input id="search-input" placeholder="mesajlarda ara..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+</div>
+
+<!-- Hesap taşıma -->
+<div class="modal-back hidden" id="modal-transfer">
+  <div class="modal">
+    <h2>Hesabı taşı</h2>
+    <p>Kimliğini, arkadaşlarını ve odalarını başka bilgisayara taşı.
+       <b>Yazışmalar bu bilgisayarda kalır.</b> Aşağıdaki metin kimliğindir —
+       kimseyle paylaşma!</p>
+    <div class="section-title">DIŞA AKTAR (bu metni kopyala)</div>
+    <textarea id="export-box" rows="3" readonly placeholder="..."></textarea>
+    <div class="modal-btns"><button id="btn-copy-export">Kopyala</button></div>
+    <div class="section-title">İÇE AKTAR (diğer PC'den gelen metni yapıştır)</div>
+    <textarea id="import-box" rows="3" placeholder="taşıma metnini buraya yapıştır"></textarea>
+    <div class="modal-btns">
+      <button id="btn-close-transfer">Kapat</button>
+      <button class="primary" id="btn-do-import">İçe aktar</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" hidden>
+<script src="app.js"></script>
+<script src="voice.js"></script>
+</body>
+</html>

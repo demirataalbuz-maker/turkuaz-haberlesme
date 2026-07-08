@@ -1,0 +1,38 @@
+{
+  "name": "turkuaz",
+  "version": "0.2.0",
+  "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "node server.js",
+    "app": "electron .",
+    "dist": "electron-builder --linux AppImage dir",
+    "test": "node test/e2e.js"
+  },
+  "build": {
+    "appId": "dev.turkuaz.app",
+    "productName": "Turkuaz",
+    "files": [
+      "electron-main.js",
+      "server.js",
+      "lib/**",
+      "public/**",
+      "build/icon.png"
+    ],
+    "linux": {
+      "target": ["AppImage", "dir"],
+      "category": "Network",
+      "icon": "build/icon.png"
+    }
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "hyperdht": "^6.15.0",
+    "hyperswarm": "^4.8.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  }
+}
