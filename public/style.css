@@ -365,6 +365,27 @@ button { font-family: inherit; }
   background: rgba(8, 17, 15, .8); border-radius: 8px; padding: 3px 10px;
   font-size: 12px; font-weight: 700; color: var(--tq);
 }
+#theater-full {
+  position: absolute; right: 10px; bottom: 10px;
+  background: rgba(8, 17, 15, .8); border: 1px solid var(--line); color: var(--tx);
+  border-radius: 8px; width: 32px; height: 28px; cursor: pointer; font-size: 15px;
+}
+#theater-full:hover { color: var(--tq); border-color: var(--tq); }
+
+/* kişi-bazlı ses popover'ı (balona sağ tıkla) */
+.lr-volpop {
+  position: absolute; transform: translate(-50%, calc(-50% - 70px)); z-index: 6;
+  background: var(--bg1); border: 1px solid var(--tq); border-radius: 12px;
+  padding: 8px 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, .6); width: 190px;
+  animation: pop .14s ease;
+}
+.lr-volname {
+  font-size: 12px; font-weight: 700; color: var(--tx); margin-bottom: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lr-volrow { display: flex; align-items: center; gap: 8px; }
+.lr-volrow input[type=range] { flex: 1; accent-color: var(--tq); height: 4px; cursor: pointer; }
+.lr-volrow .v { font-size: 11px; color: var(--tq); font-weight: 700; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ================= arama widget'ı ================= */
 #call-widget {

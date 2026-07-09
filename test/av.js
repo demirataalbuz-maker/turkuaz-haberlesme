@@ -248,6 +248,17 @@ async function main () {
     `!document.getElementById('theater').classList.contains('hidden') && document.getElementById('theater-video').videoWidth > 0`, 20000)
   console.log('PASS: ekran paylaşımı karşı tarafta oynuyor')
 
+  console.log('--- 4b) Kişi-bazlı ses ayarı + tam ekran butonu')
+  const volOk = await pB.eval(`(() => {
+    const m = [...Voice.members.values()][0]; if (!m || !m.gain) return 'gain-yok'
+    Voice.setMemberVolume(m.code, 40)
+    return Math.round(m.gain.gain.value * 100)
+  })()`)
+  if (volOk !== 40) fail('kişi-bazlı ses uygulanmadı: ' + volOk)
+  const fsBtn = await pB.eval(`!!document.getElementById('theater-full') && typeof document.getElementById('theater-video').requestFullscreen === 'function'`)
+  if (!fsBtn) fail('tam ekran butonu/API yok')
+  console.log('PASS: kişi-bazlı ses (üye gain=' + volOk + '%) + tam ekran hazır')
+
   console.log('--- 5) DM araması + kamera + ekran')
   await pA.eval(`Voice.leave(); true`)
   await pB.eval(`Voice.leave(); true`)

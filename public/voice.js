@@ -166,6 +166,35 @@ const Voice = {
   setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
   setSink (id) { try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {} },
 
+  // ---- kişi-bazlı ses (Discord gibi her katılımcı ayrı ayarlanır) ----
+  _userVols: null,
+  userVols () {
+    if (!this._userVols) { try { this._userVols = JSON.parse(localStorage.getItem('turkuaz.uservol') || '{}') } catch { this._userVols = {} } }
+    return this._userVols
+  },
+  memberVol (code) { const v = this.userVols()[code]; return v === undefined ? 1 : Math.max(0, Number(v)) / 100 },
+  setMemberVolume (code, pct) {
+    this.userVols()[code] = Number(pct)
+    try { localStorage.setItem('turkuaz.uservol', JSON.stringify(this._userVols)) } catch {}
+    const m = this.members.get(code)
+    if (m && m.gain) m.gain.gain.value = Math.max(0, Number(pct) || 0) / 100
+  },
+  showVolPopover (code, bubbleEl) {
+    const old = this.el('lr-volpop'); if (old) old.remove()
+    const m = this.members.get(code)
+    const cur = Math.round(this.memberVol(code) * 100)
+    const pop = document.createElement('div')
+    pop.id = 'lr-volpop'; pop.className = 'lr-volpop'
+    pop.innerHTML = `<div class="lr-volname">${esc((m && m.name) || 'kişi')}</div>
+      <div class="lr-volrow"><span>🔊</span><input type="range" min="0" max="200" value="${cur}"><span class="v">${cur}%</span></div>`
+    const stage = this.el('lr-stage'); stage.appendChild(pop)
+    pop.style.left = bubbleEl.style.left; pop.style.top = bubbleEl.style.top
+    const range = pop.querySelector('input'); const vlabel = pop.querySelector('.v')
+    range.oninput = () => { vlabel.textContent = range.value + '%'; this.setMemberVolume(code, range.value) }
+    const off = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('pointerdown', off, true) } }
+    setTimeout(() => document.addEventListener('pointerdown', off, true), 0)
+  },
+
   async toggleCam () {
     if (!this.room) return
     if (!this.cam) {
@@ -295,9 +324,12 @@ const Voice = {
       m.srcNode = this.ctx.createMediaStreamSource(main)
       m.analyser = this.ctx.createAnalyser()
       m.analyser.fftSize = 256
+      m.gain = this.ctx.createGain()
+      m.gain.gain.value = this.memberVol(m.code) // kişi-bazlı ses
       m.srcNode.connect(m.analyser)
       m.srcNode.connect(m.panner)
-      m.panner.connect(this.master)
+      m.panner.connect(m.gain)
+      m.gain.connect(this.master)
       this.updatePanner(m)
     }
     m.video = !!(main && main.getVideoTracks().some(t => t.readyState === 'live'))
@@ -311,6 +343,7 @@ const Voice = {
     try { m.pc.close() } catch {}
     try { m.srcNode && m.srcNode.disconnect() } catch {}
     try { m.panner && m.panner.disconnect() } catch {}
+    try { m.gain && m.gain.disconnect() } catch {}
     if (m.audioEl) { m.audioEl.srcObject = null; m.audioEl = null }
     if (m.bubble) m.bubble.remove()
     this.members.delete(code)
@@ -472,6 +505,12 @@ const Voice = {
     b.innerHTML = face + '<div class="lr-name"></div>'
     this.el('lr-stage').appendChild(b)
     if (mine) this.makeDraggable(b)
+    else b.addEventListener('contextmenu', (e) => { e.preventDefault(); this.showVolPopover(code, b) })
+    // çift tıkla → kamerayı/görüntüyü tam ekran
+    b.addEventListener('dblclick', () => {
+      const v = b.querySelector('video')
+      if (v && b.querySelector('.lr-face').classList.contains('has-video') && v.requestFullscreen) v.requestFullscreen().catch(() => {})
+    })
     return b
   },
 
@@ -828,6 +867,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('call-cam').onclick = () => CallMgr.toggleCam()
   document.getElementById('call-screen').onclick = () => CallMgr.toggleScreen()
   document.getElementById('call-end').onclick = () => CallMgr.end()
+
+  // ---- tam ekran ----
+  const fs = (el) => { if (el && el.srcObject && el.requestFullscreen) el.requestFullscreen().catch(() => {}) }
+  const theaterVid = document.getElementById('theater-video')
+  const theaterFull = document.getElementById('theater-full')
+  if (theaterFull) theaterFull.onclick = () => fs(theaterVid)
+  if (theaterVid) theaterVid.ondblclick = () => fs(theaterVid)
+  const callRemote = document.getElementById('call-remote')
+  if (callRemote) callRemote.ondblclick = () => fs(callRemote)
 })
 
 window.addEventListener('beforeunload', () => {
