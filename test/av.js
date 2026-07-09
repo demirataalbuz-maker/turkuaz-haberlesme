@@ -189,6 +189,11 @@ async function main () {
     await p.waitEval('oda state geldi', `state.rooms.length === 1`)
     await p.eval(`(async () => { openRoom(state.rooms[0]); return true })()`)
   }
+  // AI gürültü engelleme (RNNoise) yolunu test et: strong moda al
+  for (const p of [pA, pB]) {
+    await p.waitEval('RNNoise motoru yüklendi', `window.RNNoise && window.RNNoise.ready`, 15000)
+    await p.eval(`TurkuazSettings.set('noise','strong'); true`)
+  }
   await pA.eval(`Voice.join().then(() => true)`)
   await sleep(800)
   await pB.eval(`Voice.join().then(() => true)`)
@@ -215,7 +220,9 @@ async function main () {
     return b
   })()`)
   if (!(audioBytes > 0)) fail('işlenmiş mikrofondan ses akmıyor (inbound audio bytes=' + audioBytes + ')')
-  console.log('PASS: giriş-kazancı işlenmiş mikrofon sesi karşıya akıyor (' + audioBytes + ' bayt)')
+  const dnOk = await pA.eval(`!!Voice._denoise`)
+  if (!dnOk) fail('RNNoise düğümü mikrofon zincirine takılmadı')
+  console.log('PASS: RNNoise (AI gürültü engelleme) zincire takılı + ses karşıya akıyor (' + audioBytes + ' bayt)')
 
   console.log('--- 2c) Ayarlar ekranı açılıyor + cihaz seçimleri doluyor')
   await pA.eval(`TurkuazSettings.open('av'); true`)

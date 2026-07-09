@@ -20,7 +20,8 @@ function rtcConfig () {
 function _settings () { return (window.TurkuazSettings && TurkuazSettings.get()) || {} }
 function micConstraints () {
   const s = _settings()
-  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
+  const audio = { echoCancellation: true, noiseSuppression: (s.noise || 'standard') === 'standard', autoGainControl: true }
   if (s.micId) audio.deviceId = { exact: s.micId }
   return { audio }
 }
@@ -42,13 +43,19 @@ async function buildMic (obj) {
   const raw = await navigator.mediaDevices.getUserMedia(micConstraints())
   obj.micRaw = raw
   const Ctx = window.AudioContext || window.webkitAudioContext
-  if (!obj.ctx) obj.ctx = new Ctx()
+  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise 48 kHz ister
   try { obj.ctx.resume() } catch {}
   const src = obj.ctx.createMediaStreamSource(raw)
   obj.inGain = obj.ctx.createGain()
   obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
   const dest = obj.ctx.createMediaStreamDestination()
-  src.connect(obj.inGain); obj.inGain.connect(dest)
+  // AI gürültü engelleme (RNNoise): 'strong' modda ve motor hazırsa zincire gir
+  let head = src
+  if (_settings().noise === 'strong' && window.RNNoise && window.RNNoise.ready) {
+    const dn = window.RNNoise.makeDenoiseNode(obj.ctx)
+    if (dn) { src.connect(dn); head = dn; obj._denoise = dn }
+  }
+  head.connect(obj.inGain); obj.inGain.connect(dest)
   return dest.stream
 }
 
@@ -113,9 +120,9 @@ const Voice = {
     if (window.CallMgr && CallMgr.state) CallMgr.end()
     if (this.room) this.leave()
     try {
-      this.ctx = new AudioContext()
+      this.ctx = new AudioContext({ sampleRate: 48000 })
       this.ctx.resume()
-      this.mic = await buildMic(this) // ham mikrofon → giriş kazancı → gönderilen akış
+      this.mic = await buildMic(this) // ham mikrofon → (RNNoise) → giriş kazancı → gönderilen akış
     } catch (e) {
       if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
       alert('Mikrofona erişilemedi: ' + e.message); return
@@ -145,6 +152,7 @@ const Voice = {
     for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
     }
+    if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
@@ -809,6 +817,7 @@ const CallMgr = {
     for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
     }
+    if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl = null }

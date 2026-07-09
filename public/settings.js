@@ -5,7 +5,7 @@
   const KEY = 'turkuaz.settings'
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', inVol: 100, outVol: 100,
-    screenRes: '720', screenFps: 15, screenAudio: false
+    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false
   }
   let settings = load()
 
@@ -133,6 +133,22 @@
     gDev.appendChild(row('Çıkış cihazı (hoparlör)',
       selectEl(opt(spks, 'Hoparlör'), settings.spkId, v => { TurkuazSettings.set('spkId', v); Voice.setSink && Voice.setSink(v); CallMgr.setSink && CallMgr.setSink(v) })))
     p.appendChild(gDev)
+
+    // Gürültü engelleme (AI)
+    const gNoise = group('GÜRÜLTÜ ENGELLEME')
+    gNoise.appendChild(row('Mod',
+      selectEl([
+        { value: 'off', label: 'Kapalı' },
+        { value: 'standard', label: 'Standart' },
+        { value: 'strong', label: 'Güçlü — AI (RNNoise)' }
+      ], settings.noise || 'standard', v => TurkuazSettings.set('noise', v)),
+      'AI modu klavye/fan/arka plan sesini bastırır. Değişiklik bir sonraki katılım/aramada geçerli.'))
+    const cores = navigator.hardwareConcurrency || '?'
+    const mem = navigator.deviceMemory ? ('~' + navigator.deviceMemory + ' GB') : '?'
+    const sys = document.createElement('div'); sys.className = 'set-note-box'
+    sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. AI gürültü engelleme (RNNoise) hafiftir, her cihazda çalışır. Daha güçlü <b>DeepFilterNet</b> (~137 MB) güçlü makineler için isteğe bağlı indirilecek — yakında.`
+    gNoise.appendChild(sys)
+    p.appendChild(gNoise)
 
     // Ses seviyeleri
     const gVol = group('SES SEVİYESİ')
