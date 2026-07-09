@@ -298,6 +298,45 @@ button { font-family: inherit; }
 #msg-input:focus { border-color: var(--tq); box-shadow: 0 0 0 3px rgba(45, 212, 191, .12); }
 #msg-input::placeholder { color: var(--tx3); }
 #msg-input:disabled { opacity: .5; }
+#composer { position: relative; }
+#btn-emoji {
+  width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg1); border: 1px solid var(--line); color: var(--tx2);
+  font-size: 18px; cursor: pointer;
+}
+#btn-emoji:hover { border-color: var(--tq); }
+#emoji-picker {
+  position: absolute; bottom: 100%; right: 8px; margin-bottom: 6px; z-index: 30;
+  width: 300px; max-height: 236px; overflow-y: auto;
+  background: var(--bg1); border: 1px solid var(--line); border-radius: 14px;
+  padding: 8px; box-shadow: 0 14px 40px rgba(0, 0, 0, .5);
+  display: flex; flex-wrap: wrap; gap: 2px; animation: pop .14s ease;
+}
+.emoji-opt {
+  width: 34px; height: 34px; border: 0; background: none; cursor: pointer;
+  font-size: 20px; border-radius: 8px;
+}
+.emoji-opt:hover { background: var(--bg3); }
+
+/* ---- mesaj markdown ---- */
+.msg-text code {
+  font-family: ui-monospace, monospace; font-size: 13px;
+  background: var(--bg0); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px;
+}
+.msg-text pre.codeblock {
+  background: var(--bg0); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; margin: 5px 0; overflow-x: auto;
+}
+.msg-text pre.codeblock code { background: none; border: 0; padding: 0; }
+.msg-text .spoiler {
+  background: var(--bg4); color: transparent; border-radius: 4px; cursor: pointer; padding: 0 3px;
+}
+.msg-text .spoiler.shown { color: inherit; background: var(--bg3); }
+.msg-text .mention {
+  background: var(--tq-soft); color: var(--tq); border-radius: 4px; padding: 0 4px; font-weight: 600;
+}
+.msg-text .msg-link { color: var(--tq); text-decoration: none; }
+.msg-text .msg-link:hover { text-decoration: underline; }
 
 /* ================= oturma odası ================= */
 #livingroom { border-bottom: 1px solid var(--line); background: var(--bg1); flex-shrink: 0; }

@@ -174,6 +174,17 @@ async function main () {
   if (clip !== 'OK') fail('pano yazılamadı: ' + clip)
   console.log('PASS: navigator.clipboard.writeText çalışıyor')
 
+  console.log('--- 1b) Mesaj markdown/mention/link/spoiler + emoji seçici')
+  const fmtOut = await pA.eval("fmt('**kalin** *italik* `kod` ~~ustu~~ ||gizli|| @veli http://x.io')")
+  const need = ['<strong>kalin</strong>', '<em>italik</em>', '<code>kod</code>', '<del>ustu</del>', 'class="spoiler"', 'class="mention"', 'msg-link']
+  const missing = need.filter(t => !fmtOut.includes(t))
+  if (missing.length) fail('markdown eksik: ' + missing.join(', ') + ' | çıktı: ' + fmtOut)
+  await pA.eval("document.getElementById('btn-emoji').click(); true")
+  const emojiCount = await pA.eval("document.querySelectorAll('#emoji-picker .emoji-opt').length")
+  if (!(emojiCount > 10)) fail('emoji seçici açılmadı (' + emojiCount + ')')
+  await pA.eval("document.getElementById('emoji-picker').classList.add('hidden'); true")
+  console.log('PASS: markdown render + emoji seçici (' + emojiCount + ' emoji) çalışıyor')
+
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
   const hook = `window._log = []; window._err = [];
