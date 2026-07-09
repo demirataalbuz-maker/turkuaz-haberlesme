@@ -30,8 +30,8 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 6. ✅ **Üye listesi** (sağ panel) (0.3.8)
 7. ✅ **Engelleme** (0.3.8)
 8. **Grup DM** (2+ kişilik özel sohbet)
-9. **Görünüm ayarları** — açık tema + mesaj yoğunluğu (rahat/sıkışık)
-10. **Bildirim ayarları** — hangi bildirim, ses aç/kapa
+9. ✅ **Görünüm ayarları** — açık tema + mesaj yoğunluğu (0.3.9)
+10. ✅ **Bildirim ayarları** — aç/kapa (0.3.9)
 11. **Mobil** (Bare + React Native) — ayrı büyük proje, `mobil-yol-haritasi.md`
 
 ## 🧪 Büyük / sonra karar

@@ -140,6 +140,7 @@ const Voice = {
     this.sendState()
     this.hb = setInterval(() => this.sendState(), 8000)
     this._speakInt = setInterval(() => this.speakTick(), 180)
+    this._startGate() // konuşma moduna göre mikrofon kapısı
     this.sync()
   },
 
@@ -148,6 +149,7 @@ const Voice = {
     send({ t: 'room-ev', room: this.room, ev: { kind: 'voice', on: false } })
     clearInterval(this.hb)
     clearInterval(this._speakInt)
+    this._stopGate()
     for (const code of [...this.members.keys()]) this.removeMember(code)
     for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
@@ -164,9 +166,50 @@ const Voice = {
   toggleMute () {
     if (!this.mic) return
     this.muted = !this.muted
-    this.mic.getAudioTracks().forEach(t => { t.enabled = !this.muted })
+    this._micGate(this._gateOpen !== false)
     this.sendState()
     this.sync()
+  },
+
+  // ---- konuşma modu: mikrofon kapısı (açık / ses etkinliği / bas-konuş) ----
+  _gateOpen: true,
+  _micGate (open) {
+    this._gateOpen = open
+    if (this.mic) this.mic.getAudioTracks().forEach(t => { t.enabled = open && !this.muted })
+  },
+  _startGate () {
+    this._stopGate()
+    const S = () => (window.TurkuazSettings && TurkuazSettings.get()) || {}
+    const mode = S().speakMode || 'open'
+    if (mode === 'open') { this._micGate(true); return }
+    if (mode === 'vad') {
+      this._micGate(false)
+      let lastVoice = 0
+      this._gateInt = setInterval(() => {
+        const lvl = this._level(this._myAnalyser)
+        const thr = 4 + (100 - (Number(S().vadSens) || 50)) * 0.4 // hassasiyet yüksek → eşik düşük
+        const now = Date.now()
+        if (lvl > thr) lastVoice = now
+        this._micGate(now - lastVoice < 350) // 350ms hangover
+      }, 60)
+    } else if (mode === 'ptt') {
+      this._micGate(false)
+      const key = () => S().pttKey || 'Space'
+      this._pttDown = (e) => {
+        if (e.code !== key()) return
+        const t = e.target && e.target.tagName
+        if (t === 'INPUT' || t === 'TEXTAREA') return
+        e.preventDefault(); this._micGate(true)
+      }
+      this._pttUp = (e) => { if (e.code === key()) this._micGate(false) }
+      document.addEventListener('keydown', this._pttDown)
+      document.addEventListener('keyup', this._pttUp)
+    }
+  },
+  _stopGate () {
+    if (this._gateInt) { clearInterval(this._gateInt); this._gateInt = null }
+    if (this._pttDown) { document.removeEventListener('keydown', this._pttDown); this._pttDown = null }
+    if (this._pttUp) { document.removeEventListener('keyup', this._pttUp); this._pttUp = null }
   },
 
   // ---- ayar ekranından canlı uygulanan ses kontrolleri ----

@@ -6,7 +6,8 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
-    theme: 'dark', density: 'cozy', notif: true
+    theme: 'dark', density: 'cozy', notif: true,
+    speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
 
@@ -150,6 +151,33 @@
     sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. AI gürültü engelleme (RNNoise) hafiftir, her cihazda çalışır. Daha güçlü <b>DeepFilterNet</b> (~137 MB) güçlü makineler için isteğe bağlı indirilecek — yakında.`
     gNoise.appendChild(sys)
     p.appendChild(gNoise)
+
+    // Konuşma modu (açık / ses etkinliği / bas-konuş)
+    const gSpeak = group('KONUŞMA MODU')
+    gSpeak.appendChild(row('Mod',
+      selectEl([
+        { value: 'open', label: 'Açık (hep yayınla)' },
+        { value: 'vad', label: 'Ses etkinliği' },
+        { value: 'ptt', label: 'Bas-konuş' }
+      ], settings.speakMode || 'open',
+      v => { TurkuazSettings.set('speakMode', v); if (window.Voice && Voice.room) Voice._startGate(); renderPanel() }),
+      'Odada mikrofonun ne zaman yayınlayacağı. Değişiklik anında geçerli.'))
+    if ((settings.speakMode || 'open') === 'vad') {
+      gSpeak.appendChild(row('Hassasiyet',
+        slider(settings.vadSens || 50, v => { TurkuazSettings.set('vadSens', v) }),
+        'Yüksek = daha sessiz seslere açılır.'))
+    }
+    if ((settings.speakMode || 'open') === 'ptt') {
+      const keyBtn = document.createElement('button'); keyBtn.className = 'set-btn'
+      keyBtn.textContent = settings.pttKey || 'Space'
+      keyBtn.onclick = () => {
+        keyBtn.textContent = 'bir tuşa bas…'
+        const cap = (e) => { e.preventDefault(); TurkuazSettings.set('pttKey', e.code); keyBtn.textContent = e.code; document.removeEventListener('keydown', cap, true); if (window.Voice && Voice.room) Voice._startGate() }
+        document.addEventListener('keydown', cap, true)
+      }
+      gSpeak.appendChild(row('Tuş', keyBtn, 'Basılı tuttukça yayınlarsın (pencere önde iken).'))
+    }
+    p.appendChild(gSpeak)
 
     // Ses seviyeleri
     const gVol = group('SES SEVİYESİ')
