@@ -58,7 +58,9 @@ function trayMenu () {
 // ile kendi feed'ine yönlendirebilirsin. İndirilen dosya sha512 ile doğrulanır,
 // kurulum uygulama kapanırken yapılır (autoInstallOnAppQuit).
 function setupAutoUpdate () {
-  if (!app.isPackaged || !process.env.APPIMAGE) return
+  if (!app.isPackaged) return // geliştirmede (npm run app) güncelleme yok
+  // Linux'ta electron-updater YALNIZCA AppImage'ı destekler; Windows/mac paketleri sorunsuz.
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return
   let autoUpdater
   try { ({ autoUpdater } = require('electron-updater')) } catch { return }
   const testMode = !!process.env.TURKUAZ_UPDATE_TEST
