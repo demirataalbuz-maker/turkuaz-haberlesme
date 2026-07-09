@@ -143,6 +143,14 @@ async function main () {
   await ali.waitFor('ack geldi, outbox boş', c => !(c.state.pending[veliCode] || []).length)
   console.log('PASS: cift yonlu DM + teslim onayi (ack) calisiyor')
 
+  console.log('--- 4.5) Yanıtla (reply)')
+  const veliMsg = ali.msgs.find(m => m.conv === 'dm-' + veliCode && m.msg.text.includes('server da yok'))
+  if (!veliMsg) fail('Ali, Veli\'nin mesajını bulamadı (yanıt için)')
+  ali.send({ t: 'send-dm', code: veliCode, text: 'evet gordum knk', re: { id: veliMsg.msg.id, name: 'Veli', text: 'calisiyor knk, server da yok ustelik' } })
+  await veli.waitFor('yanıt (re alanı) Veli\'ye ulaştı',
+    c => c.msgs.some(m => m.conv === 'dm-' + aliCode && m.msg.re && m.msg.re.text.includes('server da yok') && m.msg.text.includes('evet gordum')))
+  console.log('PASS: yanitla (reply) — alintili mesaj karsi tarafa re alaniyla ulasti')
+
   console.log('--- 5) Ali oda kuruyor, Veli oda koduyla katılıyor')
   ali.send({ t: 'create-room', name: 'lobi' })
   await ali.waitFor('oda kuruldu', c => c.state.rooms.length === 1)

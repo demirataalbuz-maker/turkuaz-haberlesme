@@ -185,6 +185,14 @@ async function main () {
   await pA.eval("document.getElementById('emoji-picker').classList.add('hidden'); true")
   console.log('PASS: markdown render + emoji seçici (' + emojiCount + ' emoji) çalışıyor')
 
+  console.log('--- 1c) Yanıt çubuğu (reply bar) UI')
+  await pA.eval("setReply({id:'x1', name:'Veli', text:'merhaba dunya'}); true")
+  const rbShown = await pA.eval("!document.getElementById('reply-bar').classList.contains('hidden') && document.getElementById('reply-bar').innerHTML.includes('merhaba dunya')")
+  if (!rbShown) fail('yanıt çubuğu görünmedi/içerik yok')
+  await pA.eval("clearReply(); true")
+  if (!(await pA.eval("document.getElementById('reply-bar').classList.contains('hidden')"))) fail('yanıt çubuğu kapanmadı')
+  console.log('PASS: yanıt çubuğu UI (aç/kapa + içerik) çalışıyor')
+
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
   const hook = `window._log = []; window._err = [];

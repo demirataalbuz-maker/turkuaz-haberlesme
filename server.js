@@ -200,6 +200,8 @@ p2p.on('message', (peer, msg) => {
         text: typeof msg.text === 'string' ? msg.text.slice(0, 4000) : '',
         ts: Number(msg.ts) || Date.now()
       }
+      const dre = sanitizeRe(msg.re)
+      if (dre) rec.re = dre
       store.appendMessage(conv, rec)
       seenSet(conv).add(msg.id)
       emitMsg(conv, foldOne(conv, rec))
@@ -270,6 +272,8 @@ p2p.on('message', (peer, msg) => {
         id: msg.id, from: peer, name: String(msg.name || 'anon').slice(0, 64),
         text: msg.text.slice(0, 4000), ch, ts: Number(msg.ts) || Date.now()
       }
+      const rre = sanitizeRe(msg.re)
+      if (rre) rec.re = rre
       store.appendMessage(conv, rec)
       seenSet(conv).add(msg.id)
       emitMsg(conv, foldOne(conv, rec))
@@ -385,6 +389,12 @@ function normCh (ch) {
   return String(ch || 'genel').toLowerCase().replace(/[^a-z0-9ğüşöçı_-]/g, '').slice(0, 24) || 'genel'
 }
 
+// Yanıtlanan mesajın önizlemesi (yanıtla özelliği) — güvenli hale getir
+function sanitizeRe (re) {
+  if (!re || typeof re !== 'object' || typeof re.id !== 'string') return undefined
+  return { id: re.id.slice(0, 64), name: String(re.name || '').slice(0, 64), text: String(re.text || '').slice(0, 140) }
+}
+
 function learnChannel (r, ch) {
   if (!r.channels.includes(ch)) { r.channels.push(ch); store.saveRooms(rooms); pushState() }
 }
@@ -458,17 +468,19 @@ function rejectRequest (code) {
   pushState()
 }
 
-function sendDM (code, text) {
+function sendDM (code, text, re) {
   const f = friendOf(code)
   text = String(text || '').slice(0, 4000)
   if (!f || !text.trim()) return
   const id = crypto.randomUUID()
   const conv = 'dm-' + code
+  re = sanitizeRe(re)
   const rec = { id, from: myCode, name: identity.name, text, ts: Date.now() }
+  if (re) rec.re = re
   store.appendMessage(conv, rec)
   seenSet(conv).add(id)
   emitMsg(conv, foldOne(conv, rec))
-  queueDM(code, { t: 'dm', id, ack: id, text, ts: rec.ts })
+  queueDM(code, { t: 'dm', id, ack: id, text, ts: rec.ts, re })
   pushState()
 }
 
@@ -566,7 +578,7 @@ function leaveRoom (topic) {
   pushState()
 }
 
-function sendRoom (topic, ch, text) {
+function sendRoom (topic, ch, text, re) {
   const r = roomOf(topic)
   text = String(text || '').slice(0, 4000)
   if (!r || !text.trim()) return
@@ -574,11 +586,13 @@ function sendRoom (topic, ch, text) {
   learnChannel(r, ch)
   const conv = 'room-' + topic
   const id = crypto.randomUUID()
+  re = sanitizeRe(re)
   const rec = { id, from: myCode, name: identity.name, text, ch, ts: Date.now() }
+  if (re) rec.re = re
   store.appendMessage(conv, rec)
   seenSet(conv).add(id)
   emitMsg(conv, foldOne(conv, rec))
-  p2p.broadcastRoom(topic, { t: 'room', room: topic, id, name: identity.name, text, ch, ts: rec.ts })
+  p2p.broadcastRoom(topic, { t: 'room', room: topic, id, name: identity.name, text, ch, ts: rec.ts, re })
 }
 
 function setBan (topic, code, on) {
@@ -677,8 +691,8 @@ wss.on('connection', (ws) => {
       case 'create-room': createRoom(m.name); break
       case 'join-room': joinRoomByCode(m.code, m.name); break
       case 'leave-room': leaveRoom(m.topic); break
-      case 'send-dm': sendDM(m.code, m.text); break
-      case 'send-room': sendRoom(m.topic, m.ch, m.text); break
+      case 'send-dm': sendDM(m.code, m.text, m.re); break
+      case 'send-room': sendRoom(m.topic, m.ch, m.text, m.re); break
       case 'send-file':
         if (m.code) sendFile({ code: m.code }, m.fname, m.mime, m.data)
         else if (m.room) sendFile({ room: m.room, ch: m.ch }, m.fname, m.mime, m.data)

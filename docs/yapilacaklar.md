@@ -21,11 +21,12 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 3. **Ekran seçici** — paylaşırken "hangi ekran/pencere?" (şu an otomatik ana ekran) — Discord-tarzı küçük seçim penceresi
 4. **ML gürültü engelleme** — Krisp muadili (bkz. aşağıdaki bölüm)
 5. **Mesaj tarafı:**
-   - Yanıtla (reply)
-   - Markdown + kod bloğu + spoiler
-   - @bahsetme (mention)
-   - Sabitleme (pin)
-   - Emoji / GIF seçici (tam)
+   - ✅ Markdown + kod bloğu + spoiler + otomatik link (0.3.6)
+   - ✅ @bahsetme vurgusu (0.3.6)
+   - ✅ Emoji seçici (0.3.6)
+   - Yanıtla (reply) — kalan
+   - Sabitleme (pin) — kalan
+   - GIF seçici — kalan
 6. **Üye listesi** (sağ panel — kim çevrimiçi/seste)
 7. **Engelleme** (kullanıcı engelle)
 8. **Grup DM** (2+ kişilik özel sohbet)
