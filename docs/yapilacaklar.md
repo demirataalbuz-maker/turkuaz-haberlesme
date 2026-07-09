@@ -18,7 +18,7 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 ## 🔜 Kesin yapılacak (öncelik sırası)
 1. ◐ **Bas-konuş (PTT)** — uygulama-içi çalışıyor (0.3.10); global/arka-plan sürüm Electron globalShortcut+IPC ile sırada
 2. ✅ **Giriş hassasiyeti (VAD)** — ses etkinliği modu + hassasiyet (0.3.10)
-3. **Ekran seçici** — paylaşırken "hangi ekran/pencere?" (şu an otomatik ana ekran) — Electron IPC gerekir
+3. ◐ **Ekran seçici** — çoklu ekranda seçici modal (0.3.11, Electron preload/IPC altyapısı kuruldu); pencere-paylaşımı + çoklu-monitör arayüzü gerçek makinede doğrulanacak
 4. **ML gürültü engelleme** — Krisp muadili (bkz. aşağıdaki bölüm)
 5. **Mesaj tarafı:**
    - ✅ Markdown + kod bloğu + spoiler + otomatik link (0.3.6)

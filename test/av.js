@@ -165,6 +165,10 @@ async function main () {
   const pA = new Page('ayse', 9331, 'http://127.0.0.1:3411')
   const pB = new Page('banu', 9332, 'http://127.0.0.1:3412')
   await pA.connect(); await pB.connect()
+  // Odak emülasyonu: headless'ta pencere odağı çekişmesinden bağımsız olarak
+  // sayfayı "odaklı" say (pano/bildirim testleri gerçek odak ister).
+  await pA.cmd('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await pB.cmd('Emulation.setFocusEmulationEnabled', { enabled: true })
 
   console.log('--- 1) Kopyalama butonu (pano izni)')
   await pA.cmd('Page.bringToFront')

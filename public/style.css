@@ -539,6 +539,8 @@ button { font-family: inherit; }
 .modal-btns button.primary { background: var(--grad); color: #06231f; border: 0; }
 .modal-btns button:hover { filter: brightness(1.12); }
 
+#group-friends { max-height: 130px; overflow-y: auto; margin-bottom: 8px; }
+.group-friend { display: block; padding: 4px 2px; font-size: 13px; cursor: pointer; color: var(--tx); }
 #avatar-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 #avatar-grid .av-opt {
   width: 42px; height: 42px; border-radius: 12px; font-size: 22px;

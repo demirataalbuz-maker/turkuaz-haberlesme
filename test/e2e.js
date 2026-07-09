@@ -167,6 +167,17 @@ async function main () {
   await ali.waitFor('engel kaldırıldı', c => !(c.state.blocked || []).includes(veliCode))
   console.log('PASS: engelleme — engellinin mesajlari dusuruluyor, engel kaldirilabiliyor')
 
+  console.log('--- 4.8) Grup DM (arkadaşı otomatik davet)')
+  ali.send({ t: 'create-group', name: 'takim', members: [veliCode] })
+  await ali.waitFor('grup Ali\'de oluştu', c => c.state.rooms.some(r => r.name === 'takim'))
+  await veli.waitFor('Veli gruba otomatik katıldı', c => c.state.rooms.some(r => r.name === 'takim'))
+  const grp = ali.state.rooms.find(r => r.name === 'takim')
+  await ali.waitFor('grup üyesi Veli bağlandı', c => { const r = c.state.rooms.find(x => x.name === 'takim'); return r && r.online >= 1 }, 40000)
+  ali.send({ t: 'send-room', topic: grp.topic, text: 'grup mesaji testi' })
+  await veli.waitFor('grup mesajı Veli\'ye ulaştı',
+    c => c.msgs.some(m => m.conv === 'room-' + grp.topic && m.msg.text.includes('grup mesaji testi')))
+  console.log('PASS: grup DM — arkadas otomatik davet edildi + grup mesaji ulasti')
+
   console.log('--- 5) Ali oda kuruyor, Veli oda koduyla katılıyor')
   ali.send({ t: 'create-room', name: 'lobi' })
   await ali.waitFor('oda kuruldu', c => c.state.rooms.length === 1)

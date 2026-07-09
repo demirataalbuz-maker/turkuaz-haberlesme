@@ -192,6 +192,14 @@ p2p.on('message', (peer, msg) => {
       }
       break
     }
+    case 'group-invite': {
+      const f = friendOf(peer)
+      if (!f || typeof msg.invite !== 'string') return
+      if (typeof msg.ack === 'string') p2p.sendToPeer(peer, { t: 'ack', id: msg.ack })
+      joinRoomByCode(msg.invite, String(msg.name || 'grup').slice(0, 64))
+      notifyUI('Grup', (f.name || 'Biri') + ' seni "' + String(msg.name || 'grup').slice(0, 40) + '" grubuna ekledi')
+      break
+    }
     case 'dm': {
       const f = friendOf(peer)
       if (!f || typeof msg.id !== 'string') return
@@ -585,6 +593,17 @@ function createRoom (name) {
   joinRoomByCode(code + '~' + myCode, name)
 }
 
+// Grup DM = oda + seçili arkadaşlara otomatik davet (offline kuyruğa da düşer)
+function createGroup (name, memberCodes) {
+  const code = crypto.randomBytes(16).toString('hex')
+  const invite = code + '~' + myCode
+  joinRoomByCode(invite, name)
+  for (const mc of Array.isArray(memberCodes) ? memberCodes : []) {
+    if (!friendOf(mc)) continue
+    queueDM(mc, { t: 'group-invite', invite, name: String(name || 'grup').slice(0, 64), ack: crypto.randomUUID() })
+  }
+}
+
 function leaveRoom (topic) {
   const r = roomOf(topic)
   if (!r) return
@@ -710,6 +729,7 @@ wss.on('connection', (ws) => {
       case 'block': blockUser(m.code); break
       case 'unblock': unblockUser(m.code); break
       case 'create-room': createRoom(m.name); break
+      case 'create-group': createGroup(m.name, m.members); break
       case 'join-room': joinRoomByCode(m.code, m.name); break
       case 'leave-room': leaveRoom(m.topic); break
       case 'send-dm': sendDM(m.code, m.text, m.re); break
