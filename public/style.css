@@ -391,6 +391,13 @@ button { font-family: inherit; }
 .ml-item:hover { background: var(--bg2); }
 .ml-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---- ekran seçici ---- */
+.screen-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin: 6px 0 14px; max-height: 52vh; overflow-y: auto; }
+.screen-opt { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; cursor: pointer; background: var(--bg0); }
+.screen-opt:hover { border-color: var(--tq); }
+.screen-opt img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+.screen-opt span { display: block; padding: 6px 10px; font-size: 12px; color: var(--tx2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ================= oturma odası ================= */
 #livingroom { border-bottom: 1px solid var(--line); background: var(--bg1); flex-shrink: 0; }
 #lr-stage {

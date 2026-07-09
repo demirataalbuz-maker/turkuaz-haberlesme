@@ -16,9 +16,9 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 - Kopyalama butonu, WebRTC glare, çoklu STUN + TURN
 
 ## 🔜 Kesin yapılacak (öncelik sırası)
-1. **Bas-konuş (PTT)** — tuşa basılıyken yayınla (Electron globalShortcut, pencere arkada da çalışır) + ayarlardan tuş seçimi
-2. **Giriş hassasiyeti (VAD)** — gürültü eşiği + canlı ölçer; eşik altındayken otomatik sus
-3. **Ekran seçici** — paylaşırken "hangi ekran/pencere?" (şu an otomatik ana ekran) — Discord-tarzı küçük seçim penceresi
+1. ◐ **Bas-konuş (PTT)** — uygulama-içi çalışıyor (0.3.10); global/arka-plan sürüm Electron globalShortcut+IPC ile sırada
+2. ✅ **Giriş hassasiyeti (VAD)** — ses etkinliği modu + hassasiyet (0.3.10)
+3. **Ekran seçici** — paylaşırken "hangi ekran/pencere?" (şu an otomatik ana ekran) — Electron IPC gerekir
 4. **ML gürültü engelleme** — Krisp muadili (bkz. aşağıdaki bölüm)
 5. **Mesaj tarafı:**
    - ✅ Markdown + kod bloğu + spoiler + otomatik link (0.3.6)

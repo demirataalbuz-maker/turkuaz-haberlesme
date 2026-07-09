@@ -1,7 +1,7 @@
 // Turkuaz masaüstü uygulaması: server.js'i aynı süreçte başlatır ve
 // arayüzü bir pencerede açar. Pencere kapatılınca tepsiye küçülür,
 // mesajlar gelmeye devam eder.
-const { app, BrowserWindow, session, Tray, Menu, desktopCapturer, Notification } = require('electron')
+const { app, BrowserWindow, session, Tray, Menu, desktopCapturer, Notification, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const net = require('net')
@@ -109,13 +109,22 @@ async function start () {
   }
 
   const iconPath = path.join(__dirname, 'build', 'icon.png')
+  // Ekran paylaşımı için kaynak (ekran) listesi — kendi seçicimizi göstermek için
+  ipcMain.handle('turkuaz-get-sources', async () => {
+    try {
+      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
+      return sources.map(s => ({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL() }))
+    } catch { return [] }
+  })
+
   win = new BrowserWindow({
     width: 1300,
     height: 850,
     backgroundColor: '#10201e',
     title: 'Turkuaz',
     autoHideMenuBar: true,
-    icon: iconPath
+    icon: iconPath,
+    webPreferences: { preload: path.join(__dirname, 'preload.js') }
   })
   win.loadURL('http://127.0.0.1:' + PORT)
 

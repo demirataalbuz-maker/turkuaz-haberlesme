@@ -37,6 +37,41 @@ function screenConstraints () {
   if (s.screenRes && s.screenRes !== 'source') video.height = { ideal: s.screenRes === '1080' ? 1080 : 720 }
   return { video, audio: !!s.screenAudio }
 }
+// Ekran akışı: birden çok ekran varsa kendi seçicimizi göster (Electron preload),
+// yoksa/tek ekransa getDisplayMedia'ya düş (tarayıcı + tek ekran için güvenli).
+async function getScreenStream () {
+  const c = screenConstraints()
+  if (window.turkuazDesktop && window.turkuazDesktop.getSources) {
+    let sources = []
+    try { sources = await window.turkuazDesktop.getSources() } catch {}
+    if (sources && sources.length > 1) {
+      const id = await pickScreen(sources)
+      if (!id) throw new Error('picker-iptal')
+      const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxFrameRate: c.video.frameRate } }
+      if (c.video.height) video.mandatory.maxHeight = c.video.height.ideal
+      return await navigator.mediaDevices.getUserMedia({ video })
+    }
+  }
+  return await navigator.mediaDevices.getDisplayMedia(c)
+}
+function pickScreen (sources) {
+  return new Promise((resolve) => {
+    const back = document.createElement('div'); back.className = 'modal-back'
+    const modal = document.createElement('div'); modal.className = 'modal'; modal.style.width = '640px'
+    modal.innerHTML = '<h2>Hangi ekranı paylaşayım?</h2><div class="screen-grid"></div><div class="modal-btns"><button class="cancel">Vazgeç</button></div>'
+    const grid = modal.querySelector('.screen-grid')
+    for (const s of sources) {
+      const item = document.createElement('div'); item.className = 'screen-opt'
+      const img = document.createElement('img'); img.src = s.thumb; img.alt = ''
+      const label = document.createElement('span'); label.textContent = s.name
+      item.append(img, label)
+      item.onclick = () => { back.remove(); resolve(s.id) }
+      grid.appendChild(item)
+    }
+    modal.querySelector('.cancel').onclick = () => { back.remove(); resolve(null) }
+    back.appendChild(modal); document.body.appendChild(back)
+  })
+}
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
@@ -268,7 +303,7 @@ const Voice = {
     if (!this.room) return
     if (!this.screen) {
       try {
-        this.screen = await navigator.mediaDevices.getDisplayMedia(screenConstraints())
+        this.screen = await getScreenStream()
       } catch { return }
       const track = this.screen.getVideoTracks()[0]
       track.onended = () => { if (this.screen) this.toggleScreen() }
@@ -828,7 +863,7 @@ const CallMgr = {
   async toggleScreen () {
     if (!this.pc) return
     if (!this.screen) {
-      try { this.screen = await navigator.mediaDevices.getDisplayMedia(screenConstraints()) } catch { return }
+      try { this.screen = await getScreenStream() } catch { return }
       const tr = this.screen.getVideoTracks()[0]
       tr.onended = () => { if (this.screen) this.toggleScreen() }
       this.pc.addTrack(tr, this.screen)

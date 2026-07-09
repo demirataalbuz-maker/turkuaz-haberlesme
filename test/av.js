@@ -210,6 +210,12 @@ async function main () {
   await pA.eval("TurkuazSettings.set('theme','dark'); TurkuazSettings.set('density','cozy'); TurkuazSettings.apply(); true")
   console.log('PASS: açık tema + mesaj yoğunluğu uygulanıyor')
 
+  console.log('--- 1f) Ekran seçici köprüsü (preload/IPC)')
+  if (!(await pA.eval("!!(window.turkuazDesktop && window.turkuazDesktop.getSources)"))) fail('preload köprüsü (turkuazDesktop) yok')
+  const srcCount = await pA.eval("(async()=>{ try { const s = await window.turkuazDesktop.getSources(); return Array.isArray(s)?s.length:-1 } catch(e){ return 'hata:'+e.message } })()")
+  console.log('    testte ekran kaynağı sayısı:', srcCount)
+  console.log('PASS: ekran seçici köprüsü (getSources) çalışıyor')
+
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
   const hook = `window._log = []; window._err = [];

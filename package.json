@@ -1,6 +1,6 @@
 {
   "name": "turkuaz",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "main": "electron-main.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "productName": "Turkuaz",
     "files": [
       "electron-main.js",
+      "preload.js",
       "server.js",
       "lib/**",
       "public/**",
