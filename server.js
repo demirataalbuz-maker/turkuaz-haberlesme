@@ -38,6 +38,7 @@ let requests = store.loadRequests()
 let rooms = store.loadRooms()       // { code, name, topic, owner?, channels:[], mod?:{banned,ts,sig} }
 let outbox = store.loadOutbox()     // code -> [wire items], her item.ack ile onaylanır
 let filesIdx = store.loadFiles()    // fid -> { fname, mime, size }
+let blocked = store.loadBlocked()   // engellenen kodlar
 
 for (const r of rooms) if (!r.channels) r.channels = ['genel']
 
@@ -79,6 +80,7 @@ const p2p = new P2P({ seed: identity.seed, bootstrap: BOOTSTRAP })
 const myCode = p2p.publicKey
 
 function friendOf (code) { return friends.find(f => f.code === code) }
+function isBlocked (code) { return blocked.includes(code) }
 function roomOf (topic) { return rooms.find(r => r.topic === topic) }
 function isBanned (room, code) {
   return !!(room.mod && room.mod.banned.includes(code) && code !== room.owner)
@@ -164,6 +166,7 @@ p2p.on('hello', (peer, info) => {
 })
 
 p2p.on('message', (peer, msg) => {
+  if (isBlocked(peer)) return // engellenen kişiden hiçbir şey kabul etme
   switch (msg.t) {
     case 'friend-request': {
       const f = friendOf(peer)
@@ -409,7 +412,7 @@ function appendEvent (conv, ev) {
   }
   if (ev.ev === 'react') clean.emoji = String(ev.emoji || '').slice(0, 8)
   if (ev.ev === 'edit') clean.text = String(ev.text || '').slice(0, 4000)
-  if (!['react', 'edit', 'del'].includes(clean.ev)) return
+  if (!['react', 'edit', 'del', 'pin'].includes(clean.ev)) return
   store.appendMessage(conv, clean)
   seenSet(conv).add(clean.evId)
   broadcast({ t: 'msg-ev', conv, ev: clean })
@@ -465,6 +468,20 @@ function acceptRequest (code) {
 function rejectRequest (code) {
   requests = requests.filter(r => r.code !== code)
   store.saveRequests(requests)
+  pushState()
+}
+
+function blockUser (code) {
+  code = String(code || '').toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(code) || code === myCode) return
+  if (!blocked.includes(code)) { blocked.push(code); store.saveBlocked(blocked) }
+  requests = requests.filter(r => r.code !== code)
+  store.saveRequests(requests)
+  pushState()
+}
+function unblockUser (code) {
+  blocked = blocked.filter(c => c !== code)
+  store.saveBlocked(blocked)
   pushState()
 }
 
@@ -655,8 +672,10 @@ function stateObj () {
       invite: r.code + (r.owner ? '~' + r.owner : ''),
       owner: r.owner || null, isOwner: r.owner === myCode,
       channels: r.channels, banned: r.mod ? r.mod.banned : [],
-      online: p2p.roomPeerCount(r.topic)
+      online: p2p.roomPeerCount(r.topic),
+      members: p2p.roomPeers(r.topic).map(code => ({ code, name: p2p.peerName(code) || 'anon' }))
     })),
+    blocked,
     pending: Object.fromEntries(Object.entries(outbox).map(([k, v]) => [k, v.map(m => m.ack)])),
     ice: iceServers || undefined
   }
@@ -688,6 +707,8 @@ wss.on('connection', (ws) => {
       case 'add-friend': addFriend(m.code); break
       case 'accept-request': acceptRequest(m.code); break
       case 'reject-request': rejectRequest(m.code); break
+      case 'block': blockUser(m.code); break
+      case 'unblock': unblockUser(m.code); break
       case 'create-room': createRoom(m.name); break
       case 'join-room': joinRoomByCode(m.code, m.name); break
       case 'leave-room': leaveRoom(m.topic); break
@@ -710,6 +731,11 @@ wss.on('connection', (ws) => {
       case 'del':
         if (typeof m.conv === 'string' && typeof m.msgId === 'string') {
           sendEvent(m.conv, { ev: 'del', id: m.msgId })
+        }
+        break
+      case 'pin':
+        if (typeof m.conv === 'string' && typeof m.msgId === 'string') {
+          sendEvent(m.conv, { ev: 'pin', id: m.msgId })
         }
         break
       case 'typing':

@@ -271,6 +271,22 @@
       : 'Şu an yalnızca STUN var (doğrudan bağlantı). Farklı ağlardaysanız kamera/ses bağlanmayabilir — <code>ice.json</code> ile TURN ekleyebilirsin.'
     g.appendChild(box)
     p.appendChild(g)
+
+    const gb = group('ENGELLENENLER')
+    const blk = state.blocked || []
+    if (!blk.length) {
+      const n = document.createElement('div'); n.className = 'set-note-box'; n.textContent = 'Kimseyi engellemedin.'
+      gb.appendChild(n)
+    } else {
+      for (const code of blk) {
+        const r2 = document.createElement('div'); r2.className = 'set-coderow'
+        const c = document.createElement('code'); c.className = 'set-code'; c.textContent = code.slice(0, 16) + '…'
+        const b = document.createElement('button'); b.className = 'set-btn'; b.textContent = 'Engeli kaldır'
+        b.onclick = () => { send({ t: 'unblock', code }); b.textContent = 'kaldırıldı'; b.disabled = true }
+        r2.append(c, b); gb.appendChild(r2)
+      }
+    }
+    p.appendChild(gb)
   }
 
   // ---------- Gelişmiş ----------

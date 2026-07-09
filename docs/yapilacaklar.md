@@ -24,7 +24,7 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
    - ✅ Markdown + kod bloğu + spoiler + otomatik link (0.3.6)
    - ✅ @bahsetme vurgusu (0.3.6)
    - ✅ Emoji seçici (0.3.6)
-   - Yanıtla (reply) — kalan
+   - ✅ Yanıtla (reply) (0.3.7)
    - Sabitleme (pin) — kalan
    - GIF seçici — kalan
 6. **Üye listesi** (sağ panel — kim çevrimiçi/seste)

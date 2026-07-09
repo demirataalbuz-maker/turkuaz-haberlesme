@@ -193,6 +193,15 @@ async function main () {
   if (!(await pA.eval("document.getElementById('reply-bar').classList.contains('hidden')"))) fail('yanıt çubuğu kapanmadı')
   console.log('PASS: yanıt çubuğu UI (aç/kapa + içerik) çalışıyor')
 
+  console.log('--- 1d) Oda üye listesi + pin/engelle düğmeleri')
+  const mlOk = await pA.eval(`(() => {
+    openRoom(state.rooms[0])
+    const panel = document.getElementById('member-list')
+    return panel && !panel.classList.contains('hidden') && panel.querySelectorAll('.ml-item').length >= 1
+  })()`)
+  if (!mlOk) fail('üye listesi paneli render olmadı')
+  console.log('PASS: oda üye listesi render oluyor')
+
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
   const hook = `window._log = []; window._err = [];

@@ -151,6 +151,22 @@ async function main () {
     c => c.msgs.some(m => m.conv === 'dm-' + aliCode && m.msg.re && m.msg.re.text.includes('server da yok') && m.msg.text.includes('evet gordum')))
   console.log('PASS: yanitla (reply) — alintili mesaj karsi tarafa re alaniyla ulasti')
 
+  console.log('--- 4.6) Sabitleme (pin)')
+  ali.send({ t: 'pin', conv: 'dm-' + veliCode, msgId: veliMsg.msg.id })
+  await veli.waitFor('pin olayı Veli\'ye ulaştı',
+    c => c.events.some(m => m.t === 'msg-ev' && m.ev.ev === 'pin' && m.ev.id === veliMsg.msg.id))
+  console.log('PASS: sabitleme (pin) olayı P2P yayildi')
+
+  console.log('--- 4.7) Engelleme (block)')
+  ali.send({ t: 'block', code: veliCode })
+  await ali.waitFor('Veli engellendi', c => (c.state.blocked || []).includes(veliCode))
+  veli.send({ t: 'send-dm', code: aliCode, text: 'engelliyken attim bunu' })
+  await sleep(3000)
+  if (ali.msgs.some(m => m.msg.text && m.msg.text.includes('engelliyken attim'))) fail('engellinin mesajı Ali\'ye ulaştı!')
+  ali.send({ t: 'unblock', code: veliCode })
+  await ali.waitFor('engel kaldırıldı', c => !(c.state.blocked || []).includes(veliCode))
+  console.log('PASS: engelleme — engellinin mesajlari dusuruluyor, engel kaldirilabiliyor')
+
   console.log('--- 5) Ali oda kuruyor, Veli oda koduyla katılıyor')
   ali.send({ t: 'create-room', name: 'lobi' })
   await ali.waitFor('oda kuruldu', c => c.state.rooms.length === 1)
