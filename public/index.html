@@ -50,6 +50,7 @@
         <div class="me-sub" id="me-status">çevrimiçi</div>
       </div>
       <button id="btn-transfer" title="Hesabı taşı (dışa/içe aktar)">⇄</button>
+      <button id="btn-settings" title="Ayarlar">⚙</button>
       <button id="btn-edit-profile" title="Profili düzenle">✎</button>
     </footer>
   </aside>
@@ -187,9 +188,22 @@
   </div>
 </div>
 
+<!-- Ayarlar ekranı (Discord-tarzı: sol kategori + sağ panel) -->
+<div id="settings" class="hidden">
+  <aside id="set-nav-wrap">
+    <div class="set-nav-title">AYARLAR</div>
+    <div id="set-nav"></div>
+  </aside>
+  <div id="set-content">
+    <button id="set-close" title="Kapat (Esc)">✕</button>
+    <div id="set-panel"></div>
+  </div>
+</div>
+
 <input type="file" id="file-input" hidden>
 <script src="transport.js"></script>
 <script src="app.js"></script>
 <script src="voice.js"></script>
+<script src="settings.js"></script>
 </body>
 </html>

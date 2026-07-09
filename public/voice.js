@@ -15,6 +15,43 @@ const RTC_CFG = {
 function rtcConfig () {
   return (Array.isArray(state.ice) && state.ice.length) ? { iceServers: state.ice } : RTC_CFG
 }
+
+// ---- ayarlardan medya kısıtları (cihaz seçimi, ekran çözünürlüğü/FPS/ses) ----
+function _settings () { return (window.TurkuazSettings && TurkuazSettings.get()) || {} }
+function micConstraints () {
+  const s = _settings()
+  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+  if (s.micId) audio.deviceId = { exact: s.micId }
+  return { audio }
+}
+function camConstraints () {
+  const s = _settings()
+  const video = { width: { ideal: 640 }, height: { ideal: 480 } }
+  if (s.camId) video.deviceId = { exact: s.camId }
+  return { video }
+}
+function screenConstraints () {
+  const s = _settings()
+  const video = { frameRate: Number(s.screenFps) || 15 }
+  if (s.screenRes && s.screenRes !== 'source') video.height = { ideal: s.screenRes === '1080' ? 1080 : 720 }
+  return { video, audio: !!s.screenAudio }
+}
+// Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
+// (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
+async function buildMic (obj) {
+  const raw = await navigator.mediaDevices.getUserMedia(micConstraints())
+  obj.micRaw = raw
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  if (!obj.ctx) obj.ctx = new Ctx()
+  try { obj.ctx.resume() } catch {}
+  const src = obj.ctx.createMediaStreamSource(raw)
+  obj.inGain = obj.ctx.createGain()
+  obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
+  const dest = obj.ctx.createMediaStreamDestination()
+  src.connect(obj.inGain); obj.inGain.connect(dest)
+  return dest.stream
+}
+
 const LR_SCALE = 8
 
 // ============================================================
@@ -76,18 +113,20 @@ const Voice = {
     if (window.CallMgr && CallMgr.state) CallMgr.end()
     if (this.room) this.leave()
     try {
-      this.mic = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      })
-    } catch (e) { alert('Mikrofona erişilemedi: ' + e.message); return }
-    this.ctx = new AudioContext()
-    this.ctx.resume()
+      this.ctx = new AudioContext()
+      this.ctx.resume()
+      this.mic = await buildMic(this) // ham mikrofon → giriş kazancı → gönderilen akış
+    } catch (e) {
+      if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
+      alert('Mikrofona erişilemedi: ' + e.message); return
+    }
     this.master = this.ctx.createGain()
+    this.master.gain.value = (Number(_settings().outVol) || 100) / 100
     this.master.connect(this.ctx.destination)
-    // kendi konuşma göstergem
+    // kendi konuşma göstergem (giriş kazancından sonra)
     this._myAnalyser = this.ctx.createAnalyser()
     this._myAnalyser.fftSize = 256
-    this.ctx.createMediaStreamSource(this.mic).connect(this._myAnalyser)
+    this.inGain.connect(this._myAnalyser)
     this.room = activeConv.topic
     this.muted = false
     this.myPos = this.defaultPos(this.code())
@@ -103,9 +142,10 @@ const Voice = {
     clearInterval(this.hb)
     clearInterval(this._speakInt)
     for (const code of [...this.members.keys()]) this.removeMember(code)
-    for (const s of ['mic', 'cam', 'screen']) {
+    for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
     }
+    this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
     this.myPos = null
@@ -121,11 +161,16 @@ const Voice = {
     this.sync()
   },
 
+  // ---- ayar ekranından canlı uygulanan ses kontrolleri ----
+  setOutputVolume (pct) { if (this.master) this.master.gain.value = Math.max(0, Number(pct) || 0) / 100 },
+  setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
+  setSink (id) { try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {} },
+
   async toggleCam () {
     if (!this.room) return
     if (!this.cam) {
       try {
-        this.cam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 } } })
+        this.cam = await navigator.mediaDevices.getUserMedia(camConstraints())
       } catch (e) { alert('Kameraya erişilemedi: ' + e.message); return }
       const track = this.cam.getVideoTracks()[0]
       track.onended = () => { if (this.cam) this.toggleCam() }
@@ -143,7 +188,7 @@ const Voice = {
     if (!this.room) return
     if (!this.screen) {
       try {
-        this.screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false })
+        this.screen = await navigator.mediaDevices.getDisplayMedia(screenConstraints())
       } catch { return }
       const track = this.screen.getVideoTracks()[0]
       track.onended = () => { if (this.screen) this.toggleScreen() }
@@ -514,7 +559,7 @@ const CallMgr = {
     if (this.state) return
     if (Voice.room) Voice.leave()
     try {
-      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+      this.mic = await buildMic(this) // cihaz seçimi + AGC + giriş kazancı
     } catch (e) { alert('Mikrofona erişilemedi: ' + e.message); return }
     this.peer = code
     this.peerName = this.friendName(code)
@@ -557,7 +602,7 @@ const CallMgr = {
 
   async accept () {
     try {
-      this.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+      this.mic = await buildMic(this) // cihaz seçimi + AGC + giriş kazancı
     } catch (e) { alert('Mikrofon yok: ' + e.message); this.reject(); return }
     this.sendRtc(this.peer, { kind: 'call-accept' })
     this.begin()
@@ -616,6 +661,9 @@ const CallMgr = {
       if (s.getAudioTracks().length && !this.audioEl) {
         this.audioEl = new Audio()
         this.audioEl.srcObject = s
+        this.audioEl.volume = Math.min(1, (Number(_settings().outVol) || 100) / 100)
+        const sp = _settings().spkId
+        if (sp && this.audioEl.setSinkId) this.audioEl.setSinkId(sp).catch(() => {})
         this.audioEl.play().catch(() => {})
       }
       this.renderVideos()
@@ -672,10 +720,13 @@ const CallMgr = {
     this.mic.getAudioTracks().forEach(t => { t.enabled = !this.mutedFlag })
     this.renderVideos()
   },
+  setOutputVolume (pct) { if (this.audioEl) this.audioEl.volume = Math.min(1, Math.max(0, (Number(pct) || 0) / 100)) },
+  setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
+  setSink (id) { try { if (this.audioEl && this.audioEl.setSinkId) this.audioEl.setSinkId(id || '').catch(() => {}) } catch {} },
   async toggleCam () {
     if (!this.pc) return
     if (!this.cam) {
-      try { this.cam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 } } }) } catch { return }
+      try { this.cam = await navigator.mediaDevices.getUserMedia(camConstraints()) } catch { return }
       this.pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
     } else {
       this._dropSenders(this.cam)
@@ -687,7 +738,7 @@ const CallMgr = {
   async toggleScreen () {
     if (!this.pc) return
     if (!this.screen) {
-      try { this.screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 } }) } catch { return }
+      try { this.screen = await navigator.mediaDevices.getDisplayMedia(screenConstraints()) } catch { return }
       const tr = this.screen.getVideoTracks()[0]
       tr.onended = () => { if (this.screen) this.toggleScreen() }
       this.pc.addTrack(tr, this.screen)
@@ -716,9 +767,11 @@ const CallMgr = {
     clearTimeout(this.tmo)
     clearInterval(this.timeInt)
     if (this.pc) { try { this.pc.close() } catch {}; this.pc = null }
-    for (const s of ['mic', 'cam', 'screen']) {
+    for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
     }
+    this.inGain = null
+    if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl = null }
     this.streams = {}
     this.remoteScreenSid = null

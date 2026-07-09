@@ -206,6 +206,36 @@ async function main () {
   }
   console.log('PASS: oda sesli sohbeti bağlandı')
 
+  console.log('--- 2b) Ses gerçekten akıyor mu (giriş-kazancı işlenmiş mikrofon)')
+  await sleep(2500)
+  const audioBytes = await pB.eval(`(async () => {
+    const m = [...Voice.members.values()][0]; if (!m) return -1
+    const st = await m.pc.getStats(); let b = 0
+    st.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') b = r.bytesReceived })
+    return b
+  })()`)
+  if (!(audioBytes > 0)) fail('işlenmiş mikrofondan ses akmıyor (inbound audio bytes=' + audioBytes + ')')
+  console.log('PASS: giriş-kazancı işlenmiş mikrofon sesi karşıya akıyor (' + audioBytes + ' bayt)')
+
+  console.log('--- 2c) Ayarlar ekranı açılıyor + cihaz seçimleri doluyor')
+  await pA.eval(`TurkuazSettings.open('av'); true`)
+  await pA.waitEval('ayarlar açık', `!document.getElementById('settings').classList.contains('hidden')`, 6000)
+  await pA.waitEval('AV paneli render oldu', `document.querySelectorAll('#set-panel .set-select').length >= 3`, 8000)
+  const setInfo = await pA.eval(`JSON.stringify({
+    cats: document.querySelectorAll('#set-nav .set-cat').length,
+    selects: document.querySelectorAll('#set-panel .set-select').length,
+    sliders: document.querySelectorAll('#set-panel input[type=range]').length,
+    mics: document.querySelectorAll('#set-panel .set-select')[0].options.length
+  })`)
+  console.log('    ayar paneli:', setInfo)
+  // çıkış ses seviyesini değiştir → Voice.master.gain uygulanmalı
+  await pA.eval(`TurkuazSettings.set('outVol', 60); Voice.setOutputVolume(60); true`)
+  const gain = await pA.eval(`Voice.master ? Math.round(Voice.master.gain.value * 100) : -1`)
+  if (gain !== 60) fail('çıkış ses seviyesi uygulanmadı (gain=' + gain + ')')
+  await pA.eval(`document.getElementById('set-close').click(); true`)
+  await pA.waitEval('ayarlar kapandı', `document.getElementById('settings').classList.contains('hidden')`, 5000)
+  console.log('PASS: ayarlar ekranı açılıp cihazları listeliyor, ses seviyesi canlı uygulanıyor')
+
   console.log('--- 3) Kamera odada')
   await pA.eval(`Voice.toggleCam().then(() => !!Voice.cam)`)
   await pB.waitEval('B, A\'nın kamerasını görüyor',
