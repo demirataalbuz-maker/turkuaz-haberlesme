@@ -1,0 +1,25 @@
+{
+  "name": "turkuaz-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turkuaz mobil — WebView arayüz + Bare P2P çekirdeği (aynı proje, telefonda)",
+  "scripts": {
+    "start": "react-native start",
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "bare:pack": "bare-pack --target android --target ios --linked --out app/backend.bundle.mjs backend/backend.mjs",
+    "web:copy": "cp -r ../public app/web"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-webview": "^13.12.0",
+    "react-native-bare-kit": "^0.5.0",
+    "hyperswarm": "^4.8.0",
+    "hyperdht": "^6.15.0",
+    "hypercore-crypto": "^3.7.0",
+    "bare-fs": "^4.0.0",
+    "bare-path": "^3.0.0"
+  },
+  "comment": "Sürümler yaklaşık — toolchain'li makinede `npm install` sırasında kilitlenmeli. RN 0.76+ ve react-native-bare-kit uyumu kontrol edilmeli."
+}

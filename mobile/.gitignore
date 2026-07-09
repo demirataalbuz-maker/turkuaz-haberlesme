@@ -1,0 +1,9 @@
+node_modules/
+# derleme çıktıları
+android/
+ios/
+app/backend.bundle.mjs
+app/web/
+*.keystore
+.gradle/
+build/
