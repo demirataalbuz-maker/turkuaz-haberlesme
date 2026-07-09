@@ -25,10 +25,10 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
    - ✅ @bahsetme vurgusu (0.3.6)
    - ✅ Emoji seçici (0.3.6)
    - ✅ Yanıtla (reply) (0.3.7)
-   - Sabitleme (pin) — kalan
+   - ✅ Sabitleme (pin) (0.3.8)
    - GIF seçici — kalan
-6. **Üye listesi** (sağ panel — kim çevrimiçi/seste)
-7. **Engelleme** (kullanıcı engelle)
+6. ✅ **Üye listesi** (sağ panel) (0.3.8)
+7. ✅ **Engelleme** (0.3.8)
 8. **Grup DM** (2+ kişilik özel sohbet)
 9. **Görünüm ayarları** — açık tema + mesaj yoğunluğu (rahat/sıkışık)
 10. **Bildirim ayarları** — hangi bildirim, ses aç/kapa

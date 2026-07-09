@@ -5,7 +5,8 @@
   const KEY = 'turkuaz.settings'
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', inVol: 100, outVol: 100,
-    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false
+    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
+    theme: 'dark', density: 'cozy', notif: true
   }
   let settings = load()
 
@@ -59,7 +60,7 @@
     const p = $('set-panel')
     if (cur === 'av') return renderAV(p)
     if (cur === 'account') return renderAccount(p)
-    if (cur === 'appearance') return renderSimple(p, 'Görünüm', 'Şu an tek tema var: koyu turkuaz. Açık tema ve mesaj yoğunluğu (rahat/sıkışık) yol haritasında.')
+    if (cur === 'appearance') return renderAppearance(p)
     if (cur === 'privacy') return renderPrivacy(p)
     if (cur === 'advanced') return renderAdvanced(p)
   }
@@ -300,6 +301,31 @@
     p.appendChild(g)
   }
 
+  // ---------- Görünüm ----------
+  function applyAppearance () {
+    const r = document.documentElement
+    r.setAttribute('data-theme', settings.theme || 'dark')
+    r.setAttribute('data-density', settings.density || 'cozy')
+  }
+  function renderAppearance (p) {
+    p.innerHTML = '<h2>Görünüm</h2>'
+    const gt = group('TEMA')
+    gt.appendChild(row('Tema',
+      selectEl([{ value: 'dark', label: 'Koyu' }, { value: 'light', label: 'Açık' }], settings.theme || 'dark',
+        v => { TurkuazSettings.set('theme', v); applyAppearance() })))
+    gt.appendChild(row('Mesaj yoğunluğu',
+      selectEl([{ value: 'cozy', label: 'Rahat' }, { value: 'compact', label: 'Sıkışık' }], settings.density || 'cozy',
+        v => { TurkuazSettings.set('density', v); applyAppearance() })))
+    p.appendChild(gt)
+    const gn = group('BİLDİRİMLER')
+    const sw = document.createElement('label'); sw.className = 'set-switch'
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = settings.notif !== false
+    cb.onchange = () => TurkuazSettings.set('notif', cb.checked)
+    sw.append(cb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gn.appendChild(row('Masaüstü bildirimleri', sw, 'Uygulama arkadayken gelen mesaj bildirimi göster.'))
+    p.appendChild(gn)
+  }
+
   function renderSimple (p, title, text) {
     p.innerHTML = `<h2>${title}</h2>`
     const g = group(title.toUpperCase())
@@ -310,6 +336,8 @@
 
   // ---------- bağla ----------
   window.TurkuazSettings.open = open
+  window.TurkuazSettings.apply = applyAppearance
+  applyAppearance() // kayıtlı tema/yoğunluğu açılışta uygula
   document.addEventListener('DOMContentLoaded', () => {
     const gear = $('btn-settings')
     if (gear) gear.onclick = () => open('av')

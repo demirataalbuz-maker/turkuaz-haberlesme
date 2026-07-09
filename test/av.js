@@ -202,6 +202,14 @@ async function main () {
   if (!mlOk) fail('üye listesi paneli render olmadı')
   console.log('PASS: oda üye listesi render oluyor')
 
+  console.log('--- 1e) Görünüm: açık tema + mesaj yoğunluğu')
+  await pA.eval("TurkuazSettings.set('theme','light'); TurkuazSettings.apply(); true")
+  if (!(await pA.eval("document.documentElement.getAttribute('data-theme') === 'light'"))) fail('açık tema uygulanmadı')
+  await pA.eval("TurkuazSettings.set('density','compact'); TurkuazSettings.apply(); true")
+  if (!(await pA.eval("document.documentElement.getAttribute('data-density') === 'compact'"))) fail('yoğunluk uygulanmadı')
+  await pA.eval("TurkuazSettings.set('theme','dark'); TurkuazSettings.set('density','cozy'); TurkuazSettings.apply(); true")
+  console.log('PASS: açık tema + mesaj yoğunluğu uygulanıyor')
+
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
   const hook = `window._log = []; window._err = [];

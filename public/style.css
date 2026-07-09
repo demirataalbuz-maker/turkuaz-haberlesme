@@ -22,6 +22,28 @@
   --rs: 8px;
 }
 
+/* açık tema */
+:root[data-theme="light"] {
+  --bg0: #e3ebe9;
+  --bg1: #eef4f2;
+  --bg2: #f7faf9;
+  --bg3: #e2ece9;
+  --bg4: #d0e0dc;
+  --line: rgba(15, 60, 55, .13);
+  --tx: #10201e;
+  --tx2: #3f5a55;
+  --tx3: #6b837d;
+  --tq: #0d9488;
+  --tq-soft: rgba(13, 148, 136, .13);
+}
+:root[data-theme="light"] #chat-head { background: rgba(247, 250, 249, .72); }
+
+/* mesaj yoğunluğu */
+:root[data-density="compact"] #messages { padding: 8px 16px 4px; }
+:root[data-density="compact"] .msg-row { margin-top: 4px; padding-top: 1px; padding-bottom: 1px; gap: 10px; }
+:root[data-density="compact"] .msg-row.compact { margin-top: 0; }
+:root[data-density="compact"] .msg-text { line-height: 1.35; }
+
 body {
   font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Noto Sans", sans-serif;
   background: var(--bg2); color: var(--tx);
