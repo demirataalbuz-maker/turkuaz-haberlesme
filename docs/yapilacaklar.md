@@ -29,10 +29,10 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
    - GIF seçici — kalan
 6. ✅ **Üye listesi** (sağ panel) (0.3.8)
 7. ✅ **Engelleme** (0.3.8)
-8. **Grup DM** (2+ kişilik özel sohbet)
+8. ✅ **Grup DM** (arkadaşları otomatik davetli oda) (0.3.12)
 9. ✅ **Görünüm ayarları** — açık tema + mesaj yoğunluğu (0.3.9)
 10. ✅ **Bildirim ayarları** — aç/kapa (0.3.9)
-11. **Mobil** (Bare + React Native) — ayrı büyük proje, `mobil-yol-haritasi.md`
+11. ◐ **Mobil** (Bare + React Native) — Faz 1 (transport soyutlama) + Faz 2 (RN+Bare iskele) hazır (`mobile/`); kalan: server.js mantığını backend.mjs'e port + Android SDK/Bare toolchain'li makinede derle/test
 
 ## 🧪 Büyük / sonra karar
 - Konular (threads)
