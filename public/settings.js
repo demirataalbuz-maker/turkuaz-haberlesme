@@ -5,7 +5,7 @@
   const KEY = 'turkuaz.settings'
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', inVol: 100, outVol: 100,
-    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
+    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
     theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
@@ -223,7 +223,7 @@
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!settings.screenAudio
     cb.onchange = () => TurkuazSettings.set('screenAudio', cb.checked)
     scrAudio.append(cb, Object.assign(document.createElement('span'), { className: 'set-track' }))
-    gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, 'Linux\'ta ekran sesi yakalama sınırlı olabilir.'))
+    gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, 'Sistem sesi Windows\'ta yakalanır; Linux/mac\'te desteklenmiyorsa paylaşım sessiz devam eder.'))
     p.appendChild(gScr)
   }
 

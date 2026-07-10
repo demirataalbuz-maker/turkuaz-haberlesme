@@ -49,10 +49,21 @@ async function getScreenStream () {
       if (!id) throw new Error('picker-iptal')
       const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxFrameRate: c.video.frameRate } }
       if (c.video.height) video.mandatory.maxHeight = c.video.height.ideal
+      if (c.audio) {
+        // Sistem sesi (Windows'ta loopback) — aynı istekte audio da desktop'tan
+        try { return await navigator.mediaDevices.getUserMedia({ video, audio: { mandatory: { chromeMediaSource: 'desktop' } } }) } catch {}
+        // ses yakalanamıyorsa (Linux/mac) sessiz paylaşıma düş
+      }
       return await navigator.mediaDevices.getUserMedia({ video })
     }
   }
-  return await navigator.mediaDevices.getDisplayMedia(c)
+  try {
+    return await navigator.mediaDevices.getDisplayMedia(c)
+  } catch (e) {
+    // sesli istek desteklenmiyorsa (platform) sessiz dene
+    if (c.audio) return await navigator.mediaDevices.getDisplayMedia({ video: c.video })
+    throw e
+  }
 }
 function pickScreen (sources) {
   return new Promise((resolve) => {
@@ -307,7 +318,8 @@ const Voice = {
       } catch { return }
       const track = this.screen.getVideoTracks()[0]
       track.onended = () => { if (this.screen) this.toggleScreen() }
-      for (const m of this.members.values()) m.pc.addTrack(track, this.screen)
+      // tüm parçalar (sistem sesi dahil) gitsin
+      for (const m of this.members.values()) for (const t of this.screen.getTracks()) m.pc.addTrack(t, this.screen)
     } else {
       this._removeVideoSenders(t => this.screen.getTracks().includes(t))
       this.screen.getTracks().forEach(t => t.stop())
@@ -351,7 +363,7 @@ const Voice = {
     m.pc = pc
     for (const track of this.mic.getTracks()) pc.addTrack(track, this.mic)
     if (this.cam) pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
-    if (this.screen) pc.addTrack(this.screen.getVideoTracks()[0], this.screen)
+    if (this.screen) for (const t of this.screen.getTracks()) pc.addTrack(t, this.screen)
 
     pc.onicecandidate = (e) => this.sendRtc(m.code, { kind: 'ice', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
@@ -579,6 +591,9 @@ const Voice = {
     const v = this.el('theater-video')
     if (stream && v.srcObject !== stream) v.srcObject = stream
     if (!stream) v.srcObject = null
+    // Karşıdan gelen ekran SESİ buradan çalınır; kendi paylaşımın yankı yapmasın diye sessiz
+    v.muted = !stream || stream === this.screen || !stream.getAudioTracks().length
+    v.volume = Math.min(1, (Number(_settings().outVol) || 100) / 100)
     this.el('theater-label').textContent = label
   },
 
@@ -726,9 +741,35 @@ const CallMgr = {
   },
 
   async accept () {
+    if (this.state !== 'in' || this._accepting) return
+    // Zili ve zaman aşımını TIKLANIR TIKLANMAZ durdur: mikrofonun açılması
+    // (izin penceresi / meşgul aygıt) uzayınca zil arkada çalmaya devam ediyor,
+    // 35 sn dolunca da arama kendi kendine kapanıyordu.
+    this._accepting = true
+    this.stopRing()
+    clearTimeout(this.tmo)
+    document.getElementById('ring-sub').textContent = 'bağlanıyor…'
+    document.getElementById('btn-ring-accept').style.display = 'none'
+    let mic
     try {
-      this.mic = await buildMic(this) // cihaz seçimi + AGC + giriş kazancı
-    } catch (e) { alert('Mikrofon yok: ' + e.message); this.reject(); return }
+      mic = await Promise.race([
+        buildMic(this), // cihaz seçimi + AGC + giriş kazancı
+        new Promise((_, rej) => setTimeout(() => rej(new Error('mikrofon 20 sn içinde açılamadı')), 20000))
+      ])
+    } catch (e) {
+      this._accepting = false
+      alert('Mikrofon yok: ' + e.message)
+      this.reject()
+      return
+    }
+    this._accepting = false
+    if (this.state !== 'in') { // biz mikrofonu açarken arama sonlanmış
+      try { mic.getTracks().forEach(t => t.stop()) } catch {}
+      if (this.micRaw) { this.micRaw.getTracks().forEach(t => t.stop()); this.micRaw = null }
+      if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
+      return
+    }
+    this.mic = mic
     this.sendRtc(this.peer, { kind: 'call-accept' })
     this.begin()
   },
@@ -829,6 +870,10 @@ const CallMgr = {
     remote.classList.toggle('on', !!rs)
     if (rs && remote.srcObject !== rs) remote.srcObject = rs
     if (!rs) remote.srcObject = null
+    // Ekran paylaşımının sistem sesi bu elemandan çalınır (mikrofon sesi ayrı
+    // audioEl'de; kamera akışında videoyu açıp sesi çiftlememek için sessiz kal)
+    remote.muted = !(rs && rs.id === this.remoteScreenSid && rs.getAudioTracks().length)
+    remote.volume = Math.min(1, (Number(_settings().outVol) || 100) / 100)
     const ls = this.cam
     local.classList.toggle('on', !!ls)
     if (ls && local.srcObject !== ls) local.srcObject = ls
@@ -866,7 +911,7 @@ const CallMgr = {
       try { this.screen = await getScreenStream() } catch { return }
       const tr = this.screen.getVideoTracks()[0]
       tr.onended = () => { if (this.screen) this.toggleScreen() }
-      this.pc.addTrack(tr, this.screen)
+      for (const t of this.screen.getTracks()) this.pc.addTrack(t, this.screen) // ses dahil
       this.sendRtc(this.peer, { kind: 'call-state', screen: this.screen.id })
     } else {
       this._dropSenders(this.screen)
@@ -955,8 +1000,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('call-screen').onclick = () => CallMgr.toggleScreen()
   document.getElementById('call-end').onclick = () => CallMgr.end()
 
-  // ---- tam ekran ----
-  const fs = (el) => { if (el && el.srcObject && el.requestFullscreen) el.requestFullscreen().catch(() => {}) }
+  // ---- tam ekran (aç/kapa) ----
+  const fs = (el) => {
+    if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return }
+    if (el && el.srcObject && el.requestFullscreen) el.requestFullscreen().catch(e => console.error('tam ekran:', e))
+  }
   const theaterVid = document.getElementById('theater-video')
   const theaterFull = document.getElementById('theater-full')
   if (theaterFull) theaterFull.onclick = () => fs(theaterVid)

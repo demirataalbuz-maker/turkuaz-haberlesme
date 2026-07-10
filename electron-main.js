@@ -91,13 +91,20 @@ async function start () {
   await app.whenReady()
 
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
-    // clipboard-sanitized-write olmadan navigator.clipboard.writeText reddedilir
-    cb(['media', 'notifications', 'display-capture', 'clipboard-sanitized-write'].includes(permission))
+    // clipboard-sanitized-write olmadan navigator.clipboard.writeText reddedilir;
+    // fullscreen olmadan video.requestFullscreen() sessizce reddedilir (⛶/çift tık)
+    cb(['media', 'notifications', 'display-capture', 'clipboard-sanitized-write', 'fullscreen', 'speaker-selection'].includes(permission))
   })
   // Ekran paylaşımında birincil ekranı ver (kendi seçim arayüzümüz yok)
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
     desktopCapturer.getSources({ types: ['screen'] })
-      .then(sources => cb(sources.length ? { video: sources[0] } : {}))
+      .then(sources => {
+        if (!sources.length) return cb({})
+        const res = { video: sources[0] }
+        // Sistem sesi: Chromium loopback yakalama şu an yalnızca Windows'ta
+        if (req.audioRequested && process.platform === 'win32') res.audio = 'loopback'
+        cb(res)
+      })
       .catch(() => cb({}))
   })
 

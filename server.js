@@ -386,8 +386,8 @@ p2p.on('message', (peer, msg) => {
       outbox[peer] = q.filter(m => m.ack !== msg.id)
       if (outbox[peer].length !== before) {
         store.saveOutbox(outbox)
+        pushState() // önce güncel state (pending listesi) gitsin, sonra 'delivered'
         broadcast({ t: 'delivered', conv: 'dm-' + peer, id: msg.id })
-        pushState()
       }
       break
     }
