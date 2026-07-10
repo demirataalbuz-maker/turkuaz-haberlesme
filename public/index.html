@@ -77,6 +77,8 @@
         <button id="btn-mic">🎙️ Sustur</button>
         <button id="btn-cam">📷 Kamera</button>
         <button id="btn-screen">🖥️ Ekran paylaş</button>
+        <button id="btn-sndpad">🎵 Sesler</button>
+        <button id="btn-games">🎮 Oyun</button>
         <button id="btn-voice-leave" class="danger">📞 Ayrıl</button>
       </div>
     </div>
@@ -96,6 +98,7 @@
       <input id="msg-input" placeholder="Mesaj yaz...  (**kalın** *italik* `kod` ||spoiler||)" autocomplete="off" disabled>
       <button id="btn-emoji" title="Emoji">😊</button>
       <div id="emoji-picker" class="hidden"></div>
+      <div id="mention-pop" class="hidden"></div>
     </div>
   </main>
 
@@ -117,6 +120,7 @@
     <button id="call-mute">🎙️</button>
     <button id="call-cam">📷</button>
     <button id="call-screen">🖥️</button>
+    <button id="call-sndpad">🎵</button>
     <button id="call-end" class="danger">📞</button>
   </div>
 </div>
@@ -215,6 +219,8 @@
 <script src="transport.js"></script>
 <script src="app.js"></script>
 <script src="voice.js"></script>
+<script src="soundboard.js"></script>
+<script src="games.js"></script>
 <script src="settings.js"></script>
 <script type="module" src="noise.js"></script>
 </body>

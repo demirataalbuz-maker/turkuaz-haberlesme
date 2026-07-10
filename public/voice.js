@@ -192,6 +192,7 @@ const Voice = {
 
   leave () {
     if (!this.room) return
+    if (window.Games) Games.onVoiceLeave() // oyun açıksa kapat (oyuncuysak herkes için bitir)
     send({ t: 'room-ev', room: this.room, ev: { kind: 'voice', on: false } })
     clearInterval(this.hb)
     clearInterval(this._speakInt)
@@ -457,6 +458,56 @@ const Voice = {
   },
   updateAllPanners () { for (const m of this.members.values()) this.updatePanner(m) },
 
+  // ---- balon çarpışması: üst üste binme yok, değince "toink" ----
+  _toinkLast: null,
+  _toink (code) {
+    const now = Date.now()
+    this._toinkLast = this._toinkLast || {}
+    if (now - (this._toinkLast[code] || 0) < 450) return
+    this._toinkLast[code] = now
+    if (window.Soundboard) Soundboard.play('toink')
+  },
+  // Verilen (benim) pozisyonu diğer balonların dışına itele (px uzayında)
+  resolveCollision (pos, R = 80) {
+    const stage = this.el('lr-stage')
+    if (!stage) return pos
+    const r = stage.getBoundingClientRect()
+    if (r.width < 10 || r.height < 10) return pos
+    let x = pos.x / 100 * r.width
+    let y = pos.y / 100 * r.height
+    for (let iter = 0; iter < 3; iter++) {
+      let moved = false
+      for (const m of this.members.values()) {
+        if (!m.pos) continue
+        const mx = m.pos.x / 100 * r.width
+        const my = m.pos.y / 100 * r.height
+        const dx = x - mx; const dy = y - my
+        const d = Math.hypot(dx, dy)
+        if (d >= R) continue
+        if (d < 0.001) { x += R / 2; moved = true; continue }
+        const k = (R - d) / d
+        x += dx * k; y += dy * k
+        moved = true
+        this._toink(m.code)
+      }
+      if (!moved) break
+    }
+    return {
+      x: Math.min(96, Math.max(4, x / r.width * 100)),
+      y: Math.min(88, Math.max(10, y / r.height * 100))
+    }
+  },
+  // Biri üstüme gelirse kendimi kenara kaydır (küçük histerezisle — ping-pong olmasın)
+  avoidOverlap () {
+    if (!this.myPos || !this.room) return
+    const p = this.resolveCollision(this.myPos, 72)
+    if (Math.abs(p.x - this.myPos.x) < 0.5 && Math.abs(p.y - this.myPos.y) < 0.5) return
+    this.myPos = p
+    if (this._myBubble) { this._myBubble.style.left = p.x + '%'; this._myBubble.style.top = p.y + '%' }
+    this.updateAllPanners()
+    this.sendPos()
+  },
+
   // konuşma göstergesi
   _level (an) {
     if (!an) return 0
@@ -483,7 +534,7 @@ const Voice = {
       m.muted = !!data.muted
       m.avatar = data.avatar || ''
       m.screenSid = data.screen || null
-      if (data.pos) { m.pos = data.pos; this.updatePanner(m) }
+      if (data.pos) { m.pos = data.pos; this.updatePanner(m); this.avoidOverlap() }
       this.updateBubble(m)
       this.sync()
       return
@@ -534,6 +585,7 @@ const Voice = {
       m.pos = { x: Number(ev.x) || 0, y: Number(ev.y) || 0 }
       this.updatePanner(m)
       this.positionBubble(m)
+      this.avoidOverlap() // üstüme geldiyse kenara kay (toink)
     }
   },
 
@@ -659,10 +711,10 @@ const Voice = {
       const stage = this.el('lr-stage')
       const move = (ev) => {
         const r = stage.getBoundingClientRect()
-        this.myPos = {
+        this.myPos = this.resolveCollision({ // diğer balonların üstüne binme, kenarlarından kay
           x: Math.min(96, Math.max(4, ((ev.clientX - r.left) / r.width) * 100)),
           y: Math.min(88, Math.max(10, ((ev.clientY - r.top) / r.height) * 100))
-        }
+        })
         b.style.left = this.myPos.x + '%'
         b.style.top = this.myPos.y + '%'
         this.updateAllPanners()
@@ -734,6 +786,9 @@ const CallMgr = {
       case 'call-end': if (from === this.peer) this.cleanup(); break
       case 'call-state':
         if (from === this.peer) { this.remoteScreenSid = data.screen || null; this.renderVideos() }
+        break
+      case 'call-snd': // DM aramasında soundboard
+        if (from === this.peer && this.state === 'active' && window.Soundboard) Soundboard.remote(String(data.id || ''))
         break
       case 'sdp': if (from === this.peer && this.pc) this.onSdp(data.desc); break
       case 'ice': if (from === this.peer && this.pc) { try { this.pc.addIceCandidate(data.cand || undefined).catch(() => {}) } catch {} } break

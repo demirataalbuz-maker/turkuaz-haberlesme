@@ -189,6 +189,15 @@ async function main () {
   await pA.eval("document.getElementById('emoji-picker').classList.add('hidden'); true")
   console.log('PASS: markdown render + emoji seçici (' + emojiCount + ' emoji) çalışıyor')
 
+  console.log('--- 1b2) @bahsetme: kendine vurgu + yazarken öneri penceresi')
+  const meMention = await pA.eval("fmt('selam @' + (state.me.name || 'x').split(' ')[0])")
+  if (!meMention.includes('mention me')) fail('kendi adına mention .me sınıfı yok: ' + meMention)
+  await pA.eval(`(() => { openRoom(state.rooms[0]); const i = document.getElementById('msg-input'); i.value = '@'; i.selectionStart = i.selectionEnd = 1; i.oninput(); return true })()`)
+  const popN = await pA.eval("document.querySelectorAll('#mention-pop .mention-opt').length")
+  if (!(popN >= 1)) fail('mention öneri penceresi açılmadı (aday=' + popN + ')')
+  await pA.eval("hideMentionPop(); document.getElementById('msg-input').value = ''; true")
+  console.log('PASS: mention vurgusu + öneri penceresi (' + popN + ' aday) çalışıyor')
+
   console.log('--- 1c) Yanıt çubuğu (reply bar) UI')
   await pA.eval("setReply({id:'x1', name:'Veli', text:'merhaba dunya'}); true")
   const rbShown = await pA.eval("!document.getElementById('reply-bar').classList.contains('hidden') && document.getElementById('reply-bar').innerHTML.includes('merhaba dunya')")
@@ -270,6 +279,24 @@ async function main () {
   if (!dnOk) fail('RNNoise düğümü mikrofon zincirine takılmadı')
   console.log('PASS: RNNoise (AI gürültü engelleme) zincire takılı + ses karşıya akıyor (' + audioBytes + ' bayt)')
 
+  console.log('--- 2b2) Soundboard: olay odada karşıya ulaşıyor')
+  if (!(await pA.eval("!!window.Soundboard && Soundboard.sounds.length >= 6"))) fail('Soundboard yüklenmedi')
+  await pB.eval("window._snd = 0; const _r = Soundboard.remote.bind(Soundboard); Soundboard.remote = (id) => { window._snd++; return _r(id) }; true")
+  await pA.eval("Soundboard.trigger('toink'); true")
+  await pB.waitEval('soundboard olayı geldi', 'window._snd >= 1', 10000)
+  console.log('PASS: soundboard yerel çalıp olayı karşıya iletiyor')
+
+  console.log('--- 2b3) Balon çarpışması: üst üste binme çözülüyor')
+  const collided = await pB.eval(`(() => {
+    const m = [...Voice.members.values()][0]; if (!m || !Voice.myPos) return 'üye-yok'
+    m.pos = { ...Voice.myPos } // bilerek üstüme koy
+    const p = Voice.resolveCollision({ ...Voice.myPos })
+    const d = Math.hypot(p.x - m.pos.x, p.y - m.pos.y)
+    return d > 1 ? 'OK' : 'hala-çakışık:' + d
+  })()`)
+  if (collided !== 'OK') fail('balon çarpışma çözümü çalışmadı: ' + collided)
+  console.log('PASS: balon çarpışması itiyor (üst üste binmiyor)')
+
   console.log('--- 2c) Ayarlar ekranı açılıyor + cihaz seçimleri doluyor')
   await pA.eval(`TurkuazSettings.open('av'); true`)
   await pA.waitEval('ayarlar açık', `!document.getElementById('settings').classList.contains('hidden')`, 6000)
@@ -310,7 +337,13 @@ async function main () {
   if (volOk !== 40) fail('kişi-bazlı ses uygulanmadı: ' + volOk)
   const fsBtn = await pB.eval(`!!document.getElementById('theater-full') && typeof document.getElementById('theater-video').requestFullscreen === 'function'`)
   if (!fsBtn) fail('tam ekran butonu/API yok')
-  console.log('PASS: kişi-bazlı ses (üye gain=' + volOk + '%) + tam ekran hazır')
+  // GERÇEK tam ekran: izin (fullscreen) verilmezse burada reddedilir
+  const fsRes = await pB.eval(`document.getElementById('theater-video').requestFullscreen().then(() => 'OK').catch(e => 'ERR:' + e.message)`, { userGesture: true })
+  if (fsRes !== 'OK') fail('requestFullscreen reddedildi: ' + fsRes)
+  const fsOn = await pB.eval("!!document.fullscreenElement")
+  await pB.eval("document.exitFullscreen().catch(() => {}); true")
+  if (!fsOn) fail('fullscreenElement set değil')
+  console.log('PASS: kişi-bazlı ses (üye gain=' + volOk + '%) + tam ekran GERÇEKTEN açılıyor')
 
   console.log('--- 4c) Konuşma modu: bas-konuş (PTT) mikrofon kapısı')
   await pA.eval("TurkuazSettings.set('speakMode','ptt'); TurkuazSettings.set('pttKey','KeyT'); Voice._startGate(); true")
@@ -325,6 +358,26 @@ async function main () {
   await pA.eval("TurkuazSettings.set('speakMode','open'); Voice._startGate(); true")
   if (!(await pA.eval("Voice.mic.getAudioTracks()[0].enabled === true"))) fail('Açık moda dönünce mikrofon açılmadı')
   console.log('PASS: bas-konuş (PTT) kapısı çalışıyor (kapalı → bas aç → bırak kapan → açık)')
+
+  console.log('--- 4d) Oyun modu: hava hokeyi (davet → katıl → fizik yayını → girdi → kapat)')
+  await pA.eval("Games.host('hokey'); true")
+  await pB.waitEval('B davet aldı', 'Games.g && !Games.g.started', 10000)
+  await pB.eval('Games.join(); true')
+  await pA.waitEval('oyun başladı (A)', 'Games.g && Games.g.started === true && Games.g.players.length === 2', 10000)
+  await pB.waitEval('oyun başladı (B)', 'Games.g && Games.g.started === true', 10000)
+  await pB.eval('window._gs = Games.g.lastSeen; true')
+  await pB.waitEval('host durum yayını akıyor', 'Games.g && Games.g.lastSeen > window._gs', 10000)
+  await pB.eval('Games._mouse = { x: 777, y: 300 }; true')
+  try {
+    await pA.waitEval('B raket girdisi host\'a ulaştı', `Games.g && Games.g.inputs['${codeB}'] && Games.g.inputs['${codeB}'].x === 777`, 10000)
+  } catch (e) {
+    console.log('A diag:', await pA.eval("JSON.stringify({ host: Games.isHost(), started: Games.g && Games.g.started, players: Games.g ? Games.g.players.map(p => p.code.slice(0, 6)) : null, inputs: Games.g ? Games.g.inputs : null })"))
+    console.log('B diag:', await pB.eval("JSON.stringify({ g: !!Games.g, started: Games.g && Games.g.started, spec: Games.g && Games.g.spectator, ui: !!Games.ui, mouse: Games._mouse, lastIn: Games._lastIn, int: !!Games._int, sameRoom: Games.g && Voice.room === Games.g.room })"))
+    throw e
+  }
+  await pA.eval('Games.stop(); true')
+  await pB.waitEval('oyun kapandı (B)', '!Games.g', 10000)
+  console.log('PASS: oyun modu uçtan uca çalışıyor (host fiziği + P2P girdi/durum)')
 
   console.log('--- 5) DM araması + kamera + ekran')
   await pA.eval(`Voice.leave(); true`)
@@ -350,6 +403,16 @@ async function main () {
   await pB.waitEval('B, A\'nın ekranını görüyor (DM)',
     `CallMgr.remoteScreenSid && document.getElementById('call-remote').videoWidth >= 640`, 20000)
   console.log('PASS: DM ekran paylaşımı akıyor')
+
+  console.log('--- 5b) Mesaj "gitmedi" (⏳) göstergesi teslimde kalkıyor')
+  await pA.eval('(() => { openDM(state.friends[0]); return true })()')
+  await pA.eval(`send({ t: 'send-dm', code: '${codeB}', text: 'gosterge-testi' }); true`)
+  await pA.waitEval('mesaj listede', `[...document.querySelectorAll('.msg-text')].some(e => e.textContent.includes('gosterge-testi'))`, 10000)
+  await pA.waitEval('bekleyen işaret kalktı', `(() => {
+    const r = [...document.querySelectorAll('.msg-row')].find(x => x.textContent.includes('gosterge-testi'))
+    return r && !r.classList.contains('pending') && !r.querySelector('.msg-pending-mark')
+  })()`, 10000)
+  console.log('PASS: teslim edilen mesajda ⏳ işareti kalmıyor')
 
   console.log('\n=== A/V TESTLERİ GEÇTİ ✅ ===')
   await bootstrap.destroy()
