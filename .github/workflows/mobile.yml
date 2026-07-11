@@ -52,9 +52,13 @@ jobs:
       - name: Android SDK lisansları
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Gradle wrapper
-        working-directory: mobile/android
-        run: gradle wrapper --gradle-version 8.10.2 --no-daemon
+      - name: Gradle wrapper (8.10.2)
+        # Boş dizinde üret: sistem Gradle'ı (9.x) proje içinde çalışırsa RN
+        # gradle-plugin'ini derlemeye kalkıp Kotlin uyumsuzluğuna çakılıyor.
+        run: |
+          tmp=$(mktemp -d)
+          (cd "$tmp" && gradle wrapper --gradle-version 8.10.2 --no-daemon)
+          cp -r "$tmp/gradlew" "$tmp/gradlew.bat" "$tmp/gradle" mobile/android/
 
       - name: APK derle (release, debug imzalı)
         working-directory: mobile/android

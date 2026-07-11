@@ -34,6 +34,7 @@ Transport.onMessage((m) => {
       case 'typing': onTyping(m.conv, m.name); break
       case 'notify': onNotify(m); break
       case 'file-ready': if (activeConv) renderMessages(); break
+      case 'file-data': onFileData(m); break
       case 'search-res': renderSearchResults(m); break
       case 'export-res':
         $('export-box').value = btoa(unescape(encodeURIComponent(JSON.stringify(m.data))))
@@ -430,6 +431,34 @@ function renderMessages () {
   }
   if (!msgs.length) box.innerHTML = '<div class="empty-hint">Henüz mesaj yok — ilk mesajı sen at 🚀</div>'
   box.scrollTop = box.scrollHeight
+  requestBridgeFiles(box)
+}
+
+// Mobil (WebView köprüsü): /files/ HTTP yolu yok — resim içeriğini çekirdekten
+// base64 iste ve data-URL olarak yerleştir. Masaüstünde hiç çalışmaz.
+const _fileReq = new Set()
+function requestBridgeFiles (box) {
+  if (!window.TurkuazNative) return
+  box.querySelectorAll('.msg-img[data-fid], .file-missing[data-fid]').forEach(el => {
+    const fid = el.dataset.fid
+    if (_fileReq.has(fid)) return
+    _fileReq.add(fid)
+    send({ t: 'file-data', fid })
+  })
+}
+function onFileData (m) {
+  if (!m.ok || !m.data) { _fileReq.delete(m.fid); return }
+  const dataUrl = 'data:' + (m.mime || 'application/octet-stream') + ';base64,' + m.data
+  document.querySelectorAll(`[data-fid="${m.fid}"]`).forEach(el => {
+    if ((m.mime || '').startsWith('image/')) {
+      const img = document.createElement('img')
+      img.className = 'msg-img'
+      img.dataset.fid = m.fid
+      img.src = dataUrl
+      img.onclick = () => window.open(dataUrl)
+      el.replaceWith(img)
+    }
+  })
 }
 
 function fileHTML (m) {

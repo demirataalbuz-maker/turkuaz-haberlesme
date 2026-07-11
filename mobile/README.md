@@ -5,10 +5,11 @@ gösterir; P2P çekirdeğini (Hyperswarm/hyperdht) **Bare** runtime'ında çalı
 Masaüstündeki `server.js`'in yaptığını burada `backend/backend.mjs` yapar —
 tek fark: HTTP/WebSocket yerine **WebView ↔ RN ↔ Bare köprüsü**.
 
-> Durum: **İSKELE (scaffold).** Mimari + köprü + build yapılandırması hazır.
-> Bu klasör Android SDK + Bare toolchain olan bir makinede derlenir; bu depoda
-> derlenmiş APK YOKTUR. `backend.mjs`'in P2P olay işleyicisi `server.js`'i
-> birebir yansıtır — ortak çekirdeğe çıkarmak sonraki adım (aşağıya bak).
+> Durum: **ÇEKİRDEK HAZIR + CI DERLEMESİ.** Tüm mesajlaşma mantığı `lib/core.js`'te —
+> masaüstüyle AYNI kod; `backend.mjs` ince bir BareKit-IPC sarmalayıcı. Çekirdek
+> `npm run test:bare` ile GERÇEK Bare runtime'ında test ediliyor (arkadaşlık, DM+ack,
+> oda, geçmiş, arama ✅). APK, GitHub Actions `mobile-apk` workflow'uyla derlenir
+> (elle tetikle ya da `mobile-v*` tag'i). Cihazda uçtan uca test HENÜZ yapılmadı.
 
 ## Mimari
 
@@ -57,13 +58,13 @@ cd ios && pod install && cd .. && npx react-native run-ios
 ```
 
 ## Bilinen işler / sırada
-1. **Ortak çekirdek:** `server.js`'teki mesaj işleyicilerini `lib/core.js`'e
-   çıkar; hem `server.js` (masaüstü) hem `backend.mjs` (mobil) onu kullansın.
-   (Şu an backend.mjs bu mantığı ayrı taşıyor — kopya riski.)
-2. **store.js fs:** Bare'de `bare-fs` kullan; yol = uygulama veri dizini.
-3. **Arka plan:** iOS/Android uygulama kapanınca P2P soketini öldürür →
-   "kapalıyken mesaj al" için push-uyandırma gerekir (Keet gibi). Uygulama
-   açıkken sorun yok.
-4. **A/V:** WebView WebRTC (Android Chrome WebView, iOS WKWebView 14.3+) ya da
-   `react-native-webrtc`. Kamera/mikrofon izinleri Info.plist / AndroidManifest.
-5. **Dağıtım:** Android APK doğrudan; iOS App Store (yıllık ücret).
+1. ~~Ortak çekirdek~~ ✅ (`lib/core.js`; masaüstü + mobil aynı kod, `test:bare` ile doğrulanıyor)
+2. ~~store.js fs~~ ✅ (kök package.json `imports`: Node'da builtin, Bare'de bare-fs/path/events)
+3. **Cihaz testi:** APK'yı gerçek telefonda aç — worklet başlıyor mu, veri dizini
+   yazılabilir mi, DHT'ye çıkıyor mu (mobil şebekede UDP), masaüstüyle DM.
+4. **Dosyalar:** resimler köprüden base64 geliyor (`file-data`); dosya İNDİRME
+   (kaydetme) mobilde henüz yok.
+5. **Arka plan:** uygulama kapanınca P2P soketi ölür → push-uyandırma gerekir
+   (Keet gibi). Uygulama açıkken sorun yok. bare-kit suspend/resume API'si var.
+6. **A/V:** WebView WebRTC (getUserMedia izin köprüsü) ya da `react-native-webrtc`.
+7. **Dağıtım:** Android APK GitHub Release'ten; iOS sonra (App Store, yıllık ücret).

@@ -23,7 +23,8 @@
     "dist": "electron-builder --linux AppImage dir --publish never",
     "release": "electron-builder --publish always",
     "test": "node test/e2e.js",
-    "test:av": "node test/av.js"
+    "test:av": "node test/av.js",
+    "test:bare": "node test/bare-smoke.js"
   },
   "build": {
     "appId": "dev.turkuaz.app",
