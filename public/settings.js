@@ -321,10 +321,25 @@
   // ---------- Gelişmiş ----------
   function renderAdvanced (p) {
     p.innerHTML = '<h2>Gelişmiş</h2>'
+    const gv = group('SÜRÜM')
+    const ver = state.version || window.__TQ_MOBILE_VER || '?'
+    const platform = window.TurkuazNative ? 'Android' : 'Masaüstü'
+    const vrow = document.createElement('div'); vrow.className = 'set-coderow'
+    vrow.innerHTML = `<code class="set-code">Turkuaz ${esc(String(ver))} · ${platform}</code>`
+    const cpy = document.createElement('button'); cpy.className = 'set-btn'; cpy.textContent = 'Kopyala'
+    cpy.onclick = () => copyText('Turkuaz ' + ver + ' (' + platform + ')', cpy, 'Kopyalandı ✓', 'Kopyala')
+    vrow.appendChild(cpy)
+    gv.appendChild(vrow)
+    const vnote = document.createElement('div'); vnote.className = 'set-note-box'
+    vnote.innerHTML = window.TurkuazNative
+      ? 'Yeni sürüm çıkınca uygulama açılışta üstte bildirir. En güncel APK: GitHub Releases.'
+      : 'Güncellemeler otomatik iner; uygulamayı kapatıp açınca kurulur (tepsi menüsünden de kurabilirsin).'
+    gv.appendChild(vnote)
+    p.appendChild(gv)
+
     const g = group('UYGULAMA')
     const box = document.createElement('div'); box.className = 'set-note-box'
-    box.innerHTML = `Sürüm bilgisi ve otomatik güncelleme masaüstü penceresinde (tepsi menüsü) yönetilir.
-      Veri klasörü ve <code>ice.json</code> yeri README'de. Kimliğini taşımak için sol alttaki ⇄ düğmesini kullan.`
+    box.innerHTML = `Veri klasörü ve <code>ice.json</code> yeri README'de. Kimliğini taşımak için sol alttaki ⇄ düğmesini kullan.`
     g.appendChild(box)
     p.appendChild(g)
   }

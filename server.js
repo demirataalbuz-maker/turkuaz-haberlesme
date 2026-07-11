@@ -38,6 +38,7 @@ const core = createCore({
   store,
   bootstrap: BOOTSTRAP,
   iceServers,
+  version: require('./package.json').version,
   log: console.log,
   exit: (code) => process.exit(code)
 })

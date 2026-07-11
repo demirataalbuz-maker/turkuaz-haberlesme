@@ -217,6 +217,8 @@ function avatarOf (code) {
 
 // ---- render ----
 function render () {
+  const vb = $('ver-badge')
+  if (vb) { const v = state.version || window.__TQ_MOBILE_VER; vb.textContent = v ? 'v' + v : '' }
   $('me-name').textContent = state.me.name || 'isimsiz'
   $('me-status').textContent = state.me.status || 'çevrimiçi'
   $('my-code').textContent = state.me.code

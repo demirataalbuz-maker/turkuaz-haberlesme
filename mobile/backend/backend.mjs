@@ -66,7 +66,9 @@ async function main () {
   stage('store-ac')
   const store = new Store(DATA)
   stage('cekirdek-baslat (DHT açılıyor)')
-  core = coremod.createCore({ store }) // ICE varsayılanları çekirdekte
+  let ver = ''
+  try { ver = (await import('../../package.json', { with: { type: 'json' } })).default.version } catch {}
+  core = coremod.createCore({ store, version: ver }) // ICE varsayılanları çekirdekte
   core.onUI(ui)
   stage('hazir')
   log('Turkuaz Bare çekirdeği hazır — kod: ' + core.myCode.slice(0, 12) + '… veri: ' + DATA)
