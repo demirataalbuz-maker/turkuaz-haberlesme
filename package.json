@@ -4,9 +4,18 @@
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "main": "electron-main.js",
   "imports": {
-    "fs": { "bare": "bare-fs", "default": "fs" },
-    "path": { "bare": "bare-path", "default": "path" },
-    "events": { "bare": "bare-events", "default": "events" }
+    "fs": {
+      "bare": "bare-fs",
+      "default": "fs"
+    },
+    "path": {
+      "bare": "bare-path",
+      "default": "path"
+    },
+    "events": {
+      "bare": "bare-events",
+      "default": "events"
+    }
   },
   "scripts": {
     "start": "node server.js",
@@ -66,9 +75,11 @@
   },
   "devDependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",
+    "bare": "^1.30.3",
     "bare-events": "^2.5.0",
     "bare-fs": "^4.0.1",
     "bare-path": "^3.0.0",
+    "bare-process": "^4.5.1",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3"
   }

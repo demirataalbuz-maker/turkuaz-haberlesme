@@ -1,0 +1,77 @@
+# Turkuaz Android APK derlemesi.
+# Tetikleme: elle (workflow_dispatch) ya da mobile-v* tag'i.
+# Çıktı: artifact olarak APK; tag'li derlemede GitHub Release'e de eklenir.
+name: mobile-apk
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['mobile-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Kök bağımlılıklar (lib/ çekirdeği bare-pack ile buradan çözülür)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Mobil bağımlılıklar
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: Bare backend bundle (P2P çekirdeği)
+        working-directory: mobile
+        run: node scripts/pack-backend.js
+
+      - name: Arayüzü Android asset'lerine kopyala (masaüstüyle aynı public/)
+        working-directory: mobile
+        run: npm run web:copy
+
+      - name: Debug keystore üret
+        working-directory: mobile/android/app
+        run: |
+          keytool -genkeypair -v -keystore debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Turkuaz Debug,O=Turkuaz,C=TR"
+
+      - name: Android SDK lisansları
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Gradle wrapper
+        working-directory: mobile/android
+        run: gradle wrapper --gradle-version 8.10.2 --no-daemon
+
+      - name: APK derle (release, debug imzalı)
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Turkuaz-Android
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Release'e ekle (tag'li derleme)
+        if: startsWith(github.ref, 'refs/tags/mobile-v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Turkuaz Android $GITHUB_REF_NAME" \
+            --notes "Android APK (deneysel). İndirip kur: bilinmeyen kaynaklara izin vermen gerekir. Masaüstüyle aynı P2P ağına bağlanır." \
+            "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk"

@@ -1,0 +1,7 @@
+<resources>
+    <!-- Koyu turkuaz tema — WebView açılana kadar görünen zemin -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg</item>
+        <item name="android:statusBarColor">@color/splash_bg</item>
+    </style>
+</resources>

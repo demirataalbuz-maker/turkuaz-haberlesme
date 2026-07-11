@@ -1,9 +1,17 @@
 node_modules/
-# derleme çıktıları
-android/
+# derleme çıktıları (android/ proje dosyaları commit'li; build çıktıları değil)
 ios/
 app/backend.bundle.mjs
+app/backend.bundle.js
 app/web/
 *.keystore
 .gradle/
 build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/
+# gradle wrapper CI'da üretilir
+android/gradlew
+android/gradlew.bat
+android/gradle/

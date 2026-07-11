@@ -1,0 +1,27 @@
+<!-- Turkuaz logosu: gradient T + dalga (masaüstü ikonuyla aynı dil) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- T harfi -->
+    <path android:pathData="M34,36 L74,36 L74,45 L59,45 L59,74 L49,74 L49,45 L34,45 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="34" android:startY="36"
+                android:endX="74" android:endY="74"
+                android:type="linear">
+                <item android:offset="0" android:color="#5EEAD4" />
+                <item android:offset="1" android:color="#0EA5E9" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- dalga -->
+    <path
+        android:pathData="M32,80 Q40,74 48,80 T64,80 T80,80"
+        android:strokeColor="#2DD4BF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

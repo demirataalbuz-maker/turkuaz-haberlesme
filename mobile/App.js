@@ -6,8 +6,8 @@ import React, { useRef, useEffect } from 'react'
 import { SafeAreaView, StyleSheet, StatusBar } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { Worklet } from 'react-native-bare-kit'
-// bare-pack çıktısı (Bare backend'in mobil bundle'ı). `npm run bare:pack` üretir.
-import bundle from './app/backend.bundle.mjs'
+// bare-pack çıktısının base64 hali (scripts/pack-backend.js üretir) — RN bundle'ına gömülür.
+import bundleB64 from './app/backend.bundle.js'
 
 // WebView yüklenmeden önce: public/transport.js'in köprü modunu tetikleyen köprü.
 // transport.js şunları bekler: window.TurkuazNative.postMessage(str) ve
@@ -23,7 +23,9 @@ export default function App () {
 
   useEffect(() => {
     const worklet = new Worklet()
-    worklet.start('/backend.bundle', bundle)
+    worklet.start('/backend.bundle.mjs', bundleB64, 'base64').catch((e) => {
+      console.error('Bare worklet başlatılamadı:', e)
+    })
     const ipc = worklet.IPC
     ipcRef.current = ipc
 
@@ -61,6 +63,7 @@ export default function App () {
         onMessage={onMessage}
         javaScriptEnabled
         domStorageEnabled
+        allowFileAccess
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         style={styles.web}

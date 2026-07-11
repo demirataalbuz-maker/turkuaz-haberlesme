@@ -2,23 +2,40 @@
 // TÜM mesajlaşma mantığı lib/core.js'te — masaüstündeki server.js ile AYNI kod.
 // Buradaki tek iş: BareKit.IPC üzerinden satır-bazlı JSON köprüsü kurmak
 // (masaüstünde bu köprünün karşılığı Express+WebSocket).
-import { IPC } from 'barekit'
+//
+// Not: worklet içinde IPC, global `BareKit` nesnesinden gelir (react-native-bare-kit).
+/* global BareKit, Bare */
 import os from 'bare-os'
+import fs from 'bare-fs'
 import path from 'bare-path'
 import Store from '../../lib/store.js'
 import coremod from '../../lib/core.js'
 
 const { createCore } = coremod
+const { IPC } = BareKit
 
 // ---- arayüze (WebView) mesaj: satır-bazlı JSON ----
 function ui (obj) { try { IPC.write(JSON.stringify(obj) + '\n') } catch {} }
 
+// Yazılabilir veri dizini: worklet argümanı > HOME > Android uygulama dizini
+function pickDataDir () {
+  const cands = []
+  try { if (Bare.argv && Bare.argv[0] && Bare.argv[0].startsWith('/')) cands.push(Bare.argv[0]) } catch {}
+  try { cands.push(path.join(os.homedir(), 'turkuaz-data')) } catch {}
+  cands.push('/data/data/dev.turkuaz.app/files/turkuaz-data') // applicationId'den deterministik
+  for (const dir of cands) {
+    try {
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, '.w'), '1') // gerçekten yazılabilir mi?
+      return dir
+    } catch {}
+  }
+  throw new Error('yazılabilir veri dizini bulunamadı: ' + cands.join(', '))
+}
+
 let core = null
 try {
-  // Veri dizini: RN tarafı worklet argümanıyla geçebilir (Bare.argv[0]);
-  // yoksa uygulamanın ev dizini (Android'de uygulamanın kendi alanı).
-  const DATA = (typeof Bare !== 'undefined' && Bare.argv && Bare.argv[0]) ||
-    path.join(os.homedir(), 'turkuaz-data')
+  const DATA = pickDataDir()
   const store = new Store(DATA)
   core = createCore({ store }) // ICE varsayılanları çekirdekte (STUN + TURN)
   core.onUI(ui)
