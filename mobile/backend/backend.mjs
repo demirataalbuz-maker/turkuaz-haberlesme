@@ -1,21 +1,23 @@
 // Turkuaz mobil P2P çekirdeği — Bare runtime'ında (BareKit worklet) çalışır.
 // TÜM mesajlaşma mantığı lib/core.js'te — masaüstündeki server.js ile AYNI kod.
-// Buradaki tek iş: BareKit.IPC üzerinden satır-bazlı JSON köprüsü kurmak
-// (masaüstünde bu köprünün karşılığı Express+WebSocket).
 //
-// Not: worklet içinde IPC, global `BareKit` nesnesinden gelir (react-native-bare-kit).
+// Açılış AŞAMALI ve KARA KUTULUDUR: her adım hem arayüze loglanır hem diske
+// yazılır (boot-stage.txt). Native bir çökme uygulamayı anında kapatırsa,
+// bir SONRAKİ açılışta "önceki açılış şu aşamada kalmış" diye görünür —
+// uzaktan teşhis böyle yapılır. Ağır modüller (sodium/udx/hyperswarm) tek tek
+// dinamik import edilir ki suçlu izole olsun.
 /* global BareKit, Bare */
 import os from 'bare-os'
 import fs from 'bare-fs'
 import path from 'bare-path'
-import Store from '../../lib/store.js'
-import coremod from '../../lib/core.js'
 
-const { createCore } = coremod
-const { IPC } = BareKit
+const IPC = (typeof BareKit !== 'undefined' && BareKit.IPC) || null
 
-// ---- arayüze (WebView) mesaj: satır-bazlı JSON ----
-function ui (obj) { try { IPC.write(JSON.stringify(obj) + '\n') } catch {} }
+function ui (obj) {
+  const s = JSON.stringify(obj)
+  if (IPC) { try { IPC.write(s + '\n') } catch {} } else { try { console.log(s) } catch {} }
+}
+const log = (msg, level) => ui({ t: 'log', level: level || 'info', msg })
 
 // Yazılabilir veri dizini: worklet argümanı > HOME > Android uygulama dizini
 function pickDataDir () {
@@ -26,7 +28,7 @@ function pickDataDir () {
   for (const dir of cands) {
     try {
       fs.mkdirSync(dir, { recursive: true })
-      fs.writeFileSync(path.join(dir, '.w'), '1') // gerçekten yazılabilir mi?
+      fs.writeFileSync(path.join(dir, '.w'), '1')
       return dir
     } catch {}
   }
@@ -34,28 +36,59 @@ function pickDataDir () {
 }
 
 let core = null
-try {
-  const DATA = pickDataDir()
-  const store = new Store(DATA)
-  core = createCore({ store }) // ICE varsayılanları çekirdekte (STUN + TURN)
-  core.onUI(ui)
-  ui({ t: 'log', msg: 'Turkuaz Bare çekirdeği hazır — kod: ' + core.myCode.slice(0, 12) + '… veri: ' + DATA })
-} catch (e) {
-  // başlatma hatası WebView konsolunda görünsün (cihazda teşhis için)
-  ui({ t: 'log', level: 'error', msg: 'Çekirdek başlatılamadı: ' + ((e && e.stack) || e) })
+let stageFile = null
+function stage (s) {
+  log('aşama: ' + s)
+  if (stageFile) { try { fs.writeFileSync(stageFile, s) } catch {} }
 }
 
-// ---- arayüzden (WebView) gelen aksiyonlar ----
-IPC.setEncoding('utf8')
-let buf = ''
-IPC.on('data', (chunk) => {
-  buf += chunk
-  let i
-  while ((i = buf.indexOf('\n')) !== -1) {
-    const line = buf.slice(0, i); buf = buf.slice(i + 1)
-    if (!line.trim()) continue
-    let m
-    try { m = JSON.parse(line) } catch { continue }
-    if (core) core.handleUI(m, ui)
-  }
-})
+async function main () {
+  const DATA = pickDataDir()
+  stageFile = path.join(DATA, 'boot-stage.txt')
+  // kara kutu: önceki açılış yarıda mı kalmış?
+  try {
+    const prev = fs.readFileSync(stageFile, 'utf8').trim()
+    if (prev && prev !== 'hazir') {
+      log('⚠️ ÖNCEKİ açılış "' + prev + '" aşamasında yarıda kalmış — çökme büyük olasılıkla o adımda. Bu logu kopyalayıp gönder.', 'error')
+    }
+  } catch {}
+  stage('veri-dizini (' + DATA + ')')
+  stage('store-modul')
+  const { default: Store } = await import('../../lib/store.js')
+  stage('sodium-native (kripto)')
+  await import('sodium-native')
+  stage('udx-native (ağ)')
+  await import('udx-native')
+  stage('hyperswarm (DHT)')
+  await import('hyperswarm')
+  stage('cekirdek-modul')
+  const { default: coremod } = await import('../../lib/core.js')
+  stage('store-ac')
+  const store = new Store(DATA)
+  stage('cekirdek-baslat (DHT açılıyor)')
+  core = coremod.createCore({ store }) // ICE varsayılanları çekirdekte
+  core.onUI(ui)
+  stage('hazir')
+  log('Turkuaz Bare çekirdeği hazır — kod: ' + core.myCode.slice(0, 12) + '… veri: ' + DATA)
+  ui(core.stateObj()) // ilk durumu kendiliğinden gönder (__ready beklenmez — gecikmeli başlatmada kaybolabiliyor)
+}
+
+// ---- arayüzden (WebView) gelen aksiyonlar — hat her durumda açık ----
+if (IPC) {
+  IPC.setEncoding('utf8')
+  let buf = ''
+  IPC.on('data', (chunk) => {
+    buf += chunk
+    let i
+    while ((i = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1)
+      if (!line.trim()) continue
+      let m
+      try { m = JSON.parse(line) } catch { continue }
+      if (core) core.handleUI(m, ui)
+      else if (m.t === '__ready') log('çekirdek daha hazır değil — aşamalar yukarıda', 'info')
+    }
+  })
+}
+
+main().catch((e) => log('Çekirdek başlatılamadı: ' + ((e && e.stack) || e), 'error'))

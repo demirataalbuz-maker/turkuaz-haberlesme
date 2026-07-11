@@ -31,6 +31,9 @@ export default function App () {
   }
   const logWeb = (msg) => toWeb(JSON.stringify({ t: 'log', level: 'error', msg }))
 
+  const workletRef = useRef(null)
+  const startedRef = useRef(false)
+
   useEffect(() => {
     // RN tarafında yakalanmamış hata → çökme yerine tanılamaya yaz
     if (global.ErrorUtils && global.ErrorUtils.setGlobalHandler) {
@@ -38,37 +41,52 @@ export default function App () {
         logWeb('RN hatası: ' + ((e && e.message) || e))
       })
     }
-
-    const worklet = new Worklet()
-    // DİKKAT: dosya adı `.bundle` OLMALI — bare-pack çıktısı bundle formatıdır,
-    // .mjs uzantısı verilirse Bare düz JS sanıp SyntaxError ile ölür (v0.5.0 bug'ı).
-    worklet.start('/backend.bundle', bundleB64, 'base64').catch((e) => {
-      logWeb('Bare çekirdeği başlatılamadı: ' + ((e && e.message) || e))
-    })
-    const ipc = worklet.IPC
-    ipcRef.current = ipc
-    ipc.on('error', (e) => logWeb('köprü (IPC) hatası: ' + ((e && e.message) || e)))
-    ipc.on('close', () => logWeb('Bare çekirdeği kapandı (IPC koptu)'))
-
-    // Bare → WebView: satır-bazlı JSON çerçeveleme
-    let buf = ''
-    ipc.on('data', (chunk) => {
-      buf += chunk.toString()
-      let i
-      while ((i = buf.indexOf('\n')) !== -1) {
-        const line = buf.slice(0, i); buf = buf.slice(i + 1)
-        if (line) toWeb(line)
-      }
-    })
-
-    return () => { try { worklet.terminate() } catch {} }
+    return () => { try { workletRef.current && workletRef.current.terminate() } catch {} }
   }, [])
 
-  // WebView → Bare
+  // Motor, ARAYÜZ AÇILDIKTAN SONRA çalışır: native bir çökme olsa bile
+  // uygulama önce açılır, tanılama paneli (ve kara kutu) görünür kalır.
+  const startBackend = () => {
+    if (startedRef.current) return
+    startedRef.current = true
+    setTimeout(() => {
+      try {
+        const worklet = new Worklet()
+        workletRef.current = worklet
+        // DİKKAT: dosya adı `.bundle` OLMALI — bare-pack çıktısı bundle formatıdır,
+        // .mjs uzantısı verilirse Bare düz JS sanıp SyntaxError ile ölür (v0.5.0 bug'ı).
+        worklet.start('/backend.bundle', bundleB64, 'base64').catch((e) => {
+          logWeb('Bare çekirdeği başlatılamadı: ' + ((e && e.message) || e))
+        })
+        const ipc = worklet.IPC
+        ipcRef.current = ipc
+        ipc.on('error', (e) => logWeb('köprü (IPC) hatası: ' + ((e && e.message) || e)))
+        ipc.on('close', () => logWeb('Bare çekirdeği kapandı (IPC koptu)'))
+        for (const line of outboxRef.current.splice(0)) { try { ipc.write(line + '\n') } catch {} }
+
+        // Bare → WebView: satır-bazlı JSON çerçeveleme
+        let buf = ''
+        ipc.on('data', (chunk) => {
+          buf += chunk.toString()
+          let i
+          while ((i = buf.indexOf('\n')) !== -1) {
+            const line = buf.slice(0, i); buf = buf.slice(i + 1)
+            if (line) toWeb(line)
+          }
+        })
+      } catch (e) {
+        logWeb('worklet kurulamadı: ' + ((e && e.message) || e))
+      }
+    }, 700)
+  }
+
+  // WebView → Bare (motor henüz yoksa kuyruğa al, başlayınca akıt)
+  const outboxRef = useRef([])
   const onMessage = (e) => {
     try {
       const ipc = ipcRef.current
       if (ipc) ipc.write(e.nativeEvent.data + '\n')
+      else outboxRef.current.push(e.nativeEvent.data)
     } catch (err) {
       logWeb('köprüye yazılamadı: ' + ((err && err.message) || err))
     }
@@ -98,7 +116,7 @@ export default function App () {
         originWhitelist={['*']}
         injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
         onMessage={onMessage}
-        onLoadEnd={onWebReady}
+        onLoadEnd={() => { onWebReady(); startBackend() }}
         onShouldStartLoadWithRequest={onShouldStart}
         setSupportMultipleWindows={false}
         javaScriptEnabled
