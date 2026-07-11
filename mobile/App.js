@@ -10,8 +10,6 @@ import { Worklet } from 'react-native-bare-kit'
 import bundleB64 from './app/backend.bundle.js'
 
 // WebView yüklenmeden önce: public/transport.js'in köprü modunu tetikleyen köprü.
-// transport.js şunları bekler: window.TurkuazNative.postMessage(str) ve
-// window.__turkuazRecv(str). İlkini burada sağlıyoruz; ikincisini RN enjekte eder.
 const INJECT_BEFORE = `
   window.TurkuazNative = { postMessage: (s) => window.ReactNativeWebView.postMessage(s) };
   true;
@@ -20,14 +18,34 @@ const INJECT_BEFORE = `
 export default function App () {
   const webRef = useRef(null)
   const ipcRef = useRef(null)
+  const pendingRef = useRef([]) // WebView hazır olmadan gelenler
+
+  // Çekirdek/RN hatalarını WebView'e log olarak düşür — uygulama ÇÖKMEZ,
+  // arayüzdeki tanılama paneli gösterir.
+  const toWeb = (line) => {
+    const js = 'window.__turkuazRecv && window.__turkuazRecv(' + JSON.stringify(line) + '); true;'
+    if (webRef.current) { try { webRef.current.injectJavaScript(js) } catch {} } else pendingRef.current.push(js)
+  }
+  const logWeb = (msg) => toWeb(JSON.stringify({ t: 'log', level: 'error', msg }))
 
   useEffect(() => {
+    // RN tarafında yakalanmamış hata → çökme yerine tanılamaya yaz
+    if (global.ErrorUtils && global.ErrorUtils.setGlobalHandler) {
+      global.ErrorUtils.setGlobalHandler((e) => {
+        logWeb('RN hatası: ' + ((e && e.message) || e))
+      })
+    }
+
     const worklet = new Worklet()
-    worklet.start('/backend.bundle.mjs', bundleB64, 'base64').catch((e) => {
-      console.error('Bare worklet başlatılamadı:', e)
+    // DİKKAT: dosya adı `.bundle` OLMALI — bare-pack çıktısı bundle formatıdır,
+    // .mjs uzantısı verilirse Bare düz JS sanıp SyntaxError ile ölür (v0.5.0 bug'ı).
+    worklet.start('/backend.bundle', bundleB64, 'base64').catch((e) => {
+      logWeb('Bare çekirdeği başlatılamadı: ' + ((e && e.message) || e))
     })
     const ipc = worklet.IPC
     ipcRef.current = ipc
+    ipc.on('error', (e) => logWeb('köprü (IPC) hatası: ' + ((e && e.message) || e)))
+    ipc.on('close', () => logWeb('Bare çekirdeği kapandı (IPC koptu)'))
 
     // Bare → WebView: satır-bazlı JSON çerçeveleme
     let buf = ''
@@ -36,9 +54,7 @@ export default function App () {
       let i
       while ((i = buf.indexOf('\n')) !== -1) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1)
-        if (line && webRef.current) {
-          webRef.current.injectJavaScript('window.__turkuazRecv && window.__turkuazRecv(' + JSON.stringify(line) + '); true;')
-        }
+        if (line) toWeb(line)
       }
     })
 
@@ -47,8 +63,18 @@ export default function App () {
 
   // WebView → Bare
   const onMessage = (e) => {
-    const ipc = ipcRef.current
-    if (ipc) ipc.write(e.nativeEvent.data + '\n')
+    try {
+      const ipc = ipcRef.current
+      if (ipc) ipc.write(e.nativeEvent.data + '\n')
+    } catch (err) {
+      logWeb('köprüye yazılamadı: ' + ((err && err.message) || err))
+    }
+  }
+
+  const onWebReady = () => {
+    for (const js of pendingRef.current.splice(0)) {
+      try { webRef.current && webRef.current.injectJavaScript(js) } catch {}
+    }
   }
 
   return (
@@ -56,11 +82,12 @@ export default function App () {
       <StatusBar barStyle="light-content" backgroundColor="#08110f" />
       <WebView
         ref={webRef}
-        // Paketlenen arayüz (npm run web:copy → app/web). Android asset yolu:
+        // Paketlenen arayüz (npm run web:copy). Android asset yolu:
         source={{ uri: 'file:///android_asset/web/index.html' }}
         originWhitelist={['*']}
         injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
         onMessage={onMessage}
+        onLoadEnd={onWebReady}
         javaScriptEnabled
         domStorageEnabled
         allowFileAccess

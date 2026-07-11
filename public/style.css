@@ -442,6 +442,66 @@ button { font-family: inherit; }
   box-shadow: 0 18px 60px rgba(0, 0, 0, .6); animation: pop .2s ease;
 }
 #game-banner.hidden { display: none; }
+
+/* ---- tanılama paneli ---- */
+#diag-pop {
+  position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 200;
+  background: var(--bg1); border: 1px solid var(--warn); border-radius: 14px;
+  padding: 10px 12px; box-shadow: 0 18px 60px rgba(0, 0, 0, .6); animation: pop .15s ease;
+  max-width: 640px; margin: 0 auto;
+}
+#diag-pop .diag-head { display: flex; align-items: center; justify-content: space-between; color: var(--tx); font-size: 13px; }
+#diag-pop .diag-btns button {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--tx2); font-size: 12px; padding: 4px 10px; cursor: pointer; margin-left: 6px;
+}
+#diag-pop pre {
+  margin: 8px 0 0; max-height: 30vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-size: 11px; color: var(--tx2); font-family: ui-monospace, monospace;
+  background: var(--bg0); border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+}
+
+/* ---- mobil düzen (telefon): tek kolon + çekmece menü ---- */
+#btn-menu { display: none; background: none; border: 0; color: var(--tx2); font-size: 20px; cursor: pointer; padding: 2px 10px 2px 2px; }
+#drawer-back { display: none; }
+@media (max-width: 760px) {
+  #btn-menu { display: inline-block; }
+  /* sol ray + kenar çubuğu: çekmece olarak üstte kayar */
+  #rail, #sidebar {
+    position: fixed; top: 0; bottom: 0; z-index: 85;
+    transform: translateX(-120%); transition: transform .22s ease;
+  }
+  #rail { left: 0; }
+  #sidebar { left: 68px; width: min(76vw, 320px); box-shadow: 20px 0 60px rgba(0, 0, 0, .45); }
+  body.drawer-open #rail, body.drawer-open #sidebar { transform: none; }
+  body.drawer-open #drawer-back { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(0, 0, 0, .55); }
+  /* sohbet tam ekran */
+  #member-list { display: none !important; }
+  #chat-head { padding: 10px 12px; gap: 8px; }
+  #chat-sub { display: none; }
+  #chat-actions button { padding: 6px 8px; font-size: 12px; }
+  #messages { padding: 10px 12px 4px; }
+  .msg-row { gap: 8px; }
+  .msg-row.tools-open .msg-tools { display: flex; } /* mobilde hover yok — dokununca açılır */
+  #typing-bar { padding: 0 14px; }
+  #composer { padding: 4px 8px 12px; gap: 6px; }
+  #msg-input { font-size: 16px; padding: 10px 14px; } /* 16px: dokununca zoom yapmasın */
+  #btn-attach, #btn-emoji { width: 38px; height: 38px; }
+  /* modallar ekrana sığsın */
+  .modal { width: 92vw !important; max-width: 92vw; max-height: 86vh; overflow-y: auto; }
+  /* arama widget'ı alta yayılsın */
+  #call-widget { left: 8px; right: 8px; bottom: 8px; width: auto; }
+  /* ayarlar: sol kategori daralt */
+  #set-nav-wrap { width: 150px; min-width: 150px; }
+  #set-content { padding: 18px 14px; }
+  /* seçiciler taşmasın */
+  #emoji-picker { right: 4px; width: min(300px, 94vw); }
+  #mention-pop { left: 8px; right: 8px; min-width: 0; }
+  #sndpad-pop, #game-menu { width: min(280px, 94vw); }
+  /* oturma odası kontrolleri sarsın */
+  #lr-controls { flex-wrap: wrap; gap: 6px; }
+  #lr-controls button { font-size: 12px; padding: 8px 10px; }
+}
 .msg-text .msg-link { color: var(--tq); text-decoration: none; }
 .msg-text .msg-link:hover { text-decoration: underline; }
 

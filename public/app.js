@@ -16,7 +16,8 @@ const EMOJI_SET = ['😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😎
 // Gelen mesajları işle — taşıma (WebSocket / mobil köprü) transport.js'te.
 Transport.onMessage((m) => {
     switch (m.t) {
-      case 'state': state = m; render(); break
+      case 'state': state = m; gotState = true; render(); break
+      case 'log': onCoreLog(m); break
       case 'history':
         histories[m.conv] = m.msgs
         if (isActiveConv(m.conv)) renderMessages()
@@ -534,6 +535,14 @@ function attachMsgHandlers (row, m, conv) {
   })
   const img = row.querySelector('.msg-img')
   if (img) img.onclick = () => window.open(img.src)
+  // mobil: hover olmadığı için mesaja dokununca araç çubuğu açılır
+  row.addEventListener('click', (e) => {
+    if (window.innerWidth > 760) return
+    if (e.target.closest('.msg-tools, a, .react-chip, .spoiler, img')) return
+    const was = row.classList.contains('tools-open')
+    document.querySelectorAll('.msg-row.tools-open').forEach(r => r.classList.remove('tools-open'))
+    if (!was) row.classList.add('tools-open')
+  })
 }
 
 // "dosyayı getir" butonu render'dan sonra (img onerror ile) oluşabildiği için delegasyon
@@ -549,6 +558,7 @@ $('messages').addEventListener('click', (e) => {
 function openDM (f) {
   clearReply()
   hideMentionPop()
+  closeDrawer()
   activeConv = { type: 'dm', code: f.code }
   location.hash = 'dm-' + f.code
   delete unread['dm-' + f.code]
@@ -559,6 +569,7 @@ function openDM (f) {
 function openRoom (r) {
   clearReply()
   hideMentionPop()
+  closeDrawer()
   activeConv = { type: 'room', topic: r.topic }
   location.hash = 'room-' + r.topic
   delete unread['room-' + r.topic + '#' + activeCh(r.topic)]
@@ -892,6 +903,42 @@ document.addEventListener('click', function askNotif () {
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
   document.removeEventListener('click', askNotif)
 }, { once: true })
+
+// ---- çekirdek logları + tanılama paneli (özellikle mobil için) ----
+let gotState = false
+const coreLogs = []
+function onCoreLog (m) {
+  coreLogs.push((m.level === 'error' ? '❌ ' : 'ℹ️ ') + (m.msg || ''))
+  if (coreLogs.length > 60) coreLogs.shift()
+  ;(m.level === 'error' ? console.error : console.log)('[çekirdek]', m.msg)
+  if (m.level === 'error') showDiag()
+}
+function showDiag () {
+  let d = $('diag-pop')
+  if (!d) {
+    d = document.createElement('div')
+    d.id = 'diag-pop'
+    d.innerHTML = `<div class="diag-head"><b>🔧 Tanılama</b><span class="diag-btns"><button id="diag-copy">Kopyala</button><button id="diag-close">Kapat</button></span></div><pre id="diag-log"></pre>`
+    document.body.appendChild(d)
+    d.querySelector('#diag-close').onclick = () => d.remove()
+    d.querySelector('#diag-copy').onclick = () => copyText(coreLogs.join('\n'), d.querySelector('#diag-copy'), 'Kopyalandı ✓', 'Kopyala')
+  }
+  d.querySelector('#diag-log').textContent = coreLogs.length ? coreLogs.join('\n') : '(log yok)'
+}
+// mobilde çekirdekten 8 sn'de durum gelmezse tanılamayı kendiliğinden aç
+if (window.TurkuazNative) {
+  setTimeout(() => {
+    if (!gotState) { coreLogs.push('❌ Çekirdekten 8 sn içinde durum gelmedi — P2P motoru başlamamış olabilir'); showDiag() }
+  }, 8000)
+}
+
+// ---- mobil çekmece (drawer): dar ekranda sol menü ----
+function closeDrawer () { document.body.classList.remove('drawer-open') }
+function toggleDrawer () { document.body.classList.toggle('drawer-open') }
+$('btn-menu').onclick = toggleDrawer
+$('drawer-back').onclick = closeDrawer
+// dar ekranda ilk açılışta menü açık gelsin (sohbet seçili değilse)
+if (window.innerWidth < 761 && !activeConv) document.body.classList.add('drawer-open')
 
 Transport.start()
 renderMessages()
