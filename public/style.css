@@ -461,6 +461,19 @@ button { font-family: inherit; }
   background: var(--bg0); border: 1px solid var(--line); border-radius: 8px; padding: 8px;
 }
 
+/* ---- mobil güncelleme şeridi ---- */
+#update-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 150;
+  display: flex; align-items: center; gap: 10px; justify-content: center;
+  background: var(--bg1); border-bottom: 1px solid var(--tq);
+  color: var(--tx); font-size: 13px; padding: 9px 12px; animation: fadeIn .2s ease;
+}
+#update-bar a {
+  background: var(--tq); color: #06231f; text-decoration: none; font-weight: 800;
+  border-radius: 8px; padding: 5px 14px;
+}
+#update-bar button { background: none; border: 0; color: var(--tx3); font-size: 14px; cursor: pointer; }
+
 /* ---- mobil düzen (telefon): tek kolon + çekmece menü ---- */
 #btn-menu { display: none; background: none; border: 0; color: var(--tx2); font-size: 20px; cursor: pointer; padding: 2px 10px 2px 2px; }
 #drawer-back { display: none; }

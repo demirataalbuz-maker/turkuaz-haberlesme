@@ -932,6 +932,29 @@ if (window.TurkuazNative) {
   }, 8000)
 }
 
+// ---- mobil güncelleme kontrolü: yeni APK çıktıysa şerit göster ----
+if (window.TurkuazNative) {
+  setTimeout(async () => {
+    try {
+      const cur = String(window.__TQ_MOBILE_VER || '')
+      if (!cur) return
+      const rs = await (await fetch('https://api.github.com/repos/demirataalbuz-maker/turkuaz-haberlesme/releases?per_page=20')).json()
+      const rel = (Array.isArray(rs) ? rs : []).find(r => r.tag_name && r.tag_name.startsWith('mobile-v') && !r.draft)
+      if (!rel) return
+      const latest = rel.tag_name.replace('mobile-v', '').replace(/^v/, '')
+      if (latest.localeCompare(cur, undefined, { numeric: true }) <= 0) return
+      const apk = (rel.assets || []).find(a => a.name.endsWith('.apk'))
+      const bar = document.createElement('div')
+      bar.id = 'update-bar'
+      bar.innerHTML = `<span>📱 Yeni sürüm hazır: <b>v${esc(latest)}</b></span>
+        <a href="${(apk && apk.browser_download_url) || rel.html_url}" target="_blank" rel="noreferrer">İndir</a>
+        <button id="upd-x" title="Kapat">✕</button>`
+      document.body.appendChild(bar)
+      bar.querySelector('#upd-x').onclick = () => bar.remove()
+    } catch {}
+  }, 4000)
+}
+
 // ---- mobil çekmece (drawer): dar ekranda sol menü ----
 function closeDrawer () { document.body.classList.remove('drawer-open') }
 function toggleDrawer () { document.body.classList.toggle('drawer-open') }

@@ -1,6 +1,6 @@
 {
   "name": "turkuaz-mobile",
-  "version": "0.1.0",
+  "version": "0.5.2",
   "private": true,
   "description": "Turkuaz mobil — WebView arayüz + Bare P2P çekirdeği (aynı proje, telefonda)",
   "scripts": {

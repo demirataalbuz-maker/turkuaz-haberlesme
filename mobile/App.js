@@ -3,15 +3,18 @@
 // worklet'inde (backend/backend.mjs) çalıştırır. İkisini satır-bazlı JSON köprüyle
 // bağlar — masaüstündeki server.js'in WebSocket'i yerine.
 import React, { useRef, useEffect } from 'react'
-import { SafeAreaView, StyleSheet, StatusBar } from 'react-native'
+import { SafeAreaView, StyleSheet, StatusBar, Linking } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { Worklet } from 'react-native-bare-kit'
 // bare-pack çıktısının base64 hali (scripts/pack-backend.js üretir) — RN bundle'ına gömülür.
 import bundleB64 from './app/backend.bundle.js'
+import { version as APP_VERSION } from './package.json'
 
 // WebView yüklenmeden önce: public/transport.js'in köprü modunu tetikleyen köprü.
+// __TQ_MOBILE_VER: arayüzdeki güncelleme kontrolü sürümü buradan okur.
 const INJECT_BEFORE = `
   window.TurkuazNative = { postMessage: (s) => window.ReactNativeWebView.postMessage(s) };
+  window.__TQ_MOBILE_VER = ${JSON.stringify(APP_VERSION)};
   true;
 `
 
@@ -77,6 +80,14 @@ export default function App () {
     }
   }
 
+  // Dış bağlantılar (mesajdaki linkler, APK indirme) telefonun tarayıcısında açılsın
+  const onShouldStart = (req) => {
+    const u = (req && req.url) || ''
+    if (u.startsWith('file://') || u.startsWith('about:') || u.startsWith('data:')) return true
+    Linking.openURL(u).catch(() => {})
+    return false
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="light-content" backgroundColor="#08110f" />
@@ -88,6 +99,8 @@ export default function App () {
         injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
         onMessage={onMessage}
         onLoadEnd={onWebReady}
+        onShouldStartLoadWithRequest={onShouldStart}
+        setSupportMultipleWindows={false}
         javaScriptEnabled
         domStorageEnabled
         allowFileAccess
