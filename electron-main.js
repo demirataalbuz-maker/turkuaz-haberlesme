@@ -13,6 +13,9 @@ if (!process.env.TURKUAZ_DATA && !process.env.PEERCORD_DATA) {
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+// Pencere arkadayken zamanlayıcı kısılmasın: arama/oyun/ses arka planda da aksın
+app.commandLine.appendSwitch('disable-background-timer-throttling')
+app.commandLine.appendSwitch('disable-renderer-backgrounding')
 if (process.env.PEERCORD_FAKE_MEDIA || process.env.TURKUAZ_FAKE_MEDIA) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')

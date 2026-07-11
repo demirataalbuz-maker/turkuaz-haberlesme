@@ -73,6 +73,7 @@
       if (!this.g) return
       if (!silent) this.ev({ op: 'end', gid: this.g.id })
       this.loopStop()
+      this._restoreAudio()
       this.g = null
       this.hideOverlay()
     },
@@ -136,7 +137,7 @@
             this.g.score = d.score
             if (changed && window.Soundboard) Soundboard.play('tada')
           }
-          if (d.hit && window.Soundboard) this.clickSound()
+          if (d.hit) this.clickSound(this.g.puck ? (this.g.puck.x / W) * 2 - 1 : undefined)
           this.g.freeze = d.freeze || 0
           break
         }
@@ -183,7 +184,37 @@
       if (g.started && !this.isHost() && Date.now() - g.lastSeen > 4000) { // host koptu
         this.banner('Bağlantı koptu 😕'); setTimeout(() => this.stop(true), 2000); g.started = 'ended'
       }
+      this._audioSync()
       this.draw()
+    },
+
+    // ---- konumsal ses oyunu takip eder: sesin, raketinin olduğu yerden gelir ----
+    _lastAudio: 0,
+    _audioSync () {
+      const g = this.g
+      if (!g || !g.started || !window.Voice || Voice.room !== g.room || !Voice.myPos) return
+      const now = Date.now()
+      if (now - this._lastAudio < 100) return // 10Hz yeter
+      this._lastAudio = now
+      if (!this._savedPos) { // oyun bitince eski oda düzenine dönmek için
+        this._savedPos = { my: { ...Voice.myPos }, members: {} }
+        for (const [c, m] of Voice.members) this._savedPos.members[c] = { ...m.pos }
+      }
+      const map = (p) => ({ x: 4 + (p.x / W) * 92, y: 10 + (p.y / H) * 78 })
+      for (const p of g.players) {
+        const pad = g.pads[p.code]
+        if (!pad) continue
+        if (p.code === state.me.code) Voice.myPos = map(pad)
+        else { const m = Voice.members.get(p.code); if (m) m.pos = map(pad) }
+      }
+      Voice.updateAllPanners()
+    },
+    _restoreAudio () {
+      if (!this._savedPos || !window.Voice) { this._savedPos = null; return }
+      if (Voice.myPos) Voice.myPos = this._savedPos.my
+      for (const [c, m] of Voice.members) if (this._savedPos.members[c]) m.pos = this._savedPos.members[c]
+      Voice.updateAllPanners()
+      this._savedPos = null
     },
 
     physics () {
@@ -238,7 +269,7 @@
       // hız sınırı
       const sp = Math.hypot(pk.vx, pk.vy); const MAXS = 22
       if (sp > MAXS) { pk.vx = pk.vx / sp * MAXS; pk.vy = pk.vy / sp * MAXS }
-      if (hit) this.clickSound()
+      if (hit) this.clickSound((pk.x / W) * 2 - 1)
       this.broadcastState(hit)
     },
 
@@ -279,7 +310,26 @@
       this.ev({ op: 'input', gid: this.g.id, x: Math.round(this._mouse.x), y: Math.round(this._mouse.y) })
     },
 
-    clickSound () {
+    // kamera görüntüsü: kendim → Voice.cam'dan gizli video; diğerleri → balon videosu
+    _videoFor (code) {
+      if (!window.Voice || !Voice.room) return null
+      if (code === state.me.code) {
+        if (!Voice.cam) { this._selfVid = null; return null }
+        if (!this._selfVid || this._selfVid.srcObject !== Voice.cam) {
+          const v = document.createElement('video')
+          v.muted = true; v.autoplay = true; v.playsInline = true
+          v.srcObject = Voice.cam
+          v.play().catch(() => {})
+          this._selfVid = v
+        }
+        return this._selfVid.videoWidth ? this._selfVid : null
+      }
+      const m = Voice.members.get(code)
+      const v = m && m.video && m.bubble && m.bubble.querySelector('video')
+      return (v && v.srcObject && v.videoWidth) ? v : null
+    },
+
+    clickSound (panX) { // panX: pak nerede çarptıysa ses o yandan (-1 sol … 1 sağ)
       const now = Date.now()
       if (now - (this._lastClick || 0) < 90) return
       this._lastClick = now
@@ -289,7 +339,13 @@
         const o = c.createOscillator(); const gn = c.createGain()
         o.type = 'triangle'; o.frequency.setValueAtTime(700, t); o.frequency.exponentialRampToValueAtTime(240, t + 0.07)
         gn.gain.setValueAtTime(0.12, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.09)
-        o.connect(gn).connect(c.destination)
+        let head = gn
+        if (typeof panX === 'number' && c.createStereoPanner) {
+          const sp = c.createStereoPanner()
+          sp.pan.value = Math.max(-1, Math.min(1, panX))
+          gn.connect(sp); head = sp
+        }
+        o.connect(gn); head.connect(c.destination)
         o.start(t); o.stop(t + 0.1)
       } catch {}
     },
@@ -317,6 +373,8 @@
         const mouse = (e) => {
           const r = cv.getBoundingClientRect()
           this._mouse = { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }
+          // girdiyi olaydan da gönder — zamanlayıcı kısılsa bile raket akar
+          if (this.g && this.g.started && !this.isHost() && !this.g.spectator) this.sendInput()
         }
         cv.addEventListener('pointermove', mouse)
         cv.addEventListener('pointerdown', mouse)
@@ -400,21 +458,40 @@
       // skor
       const sc = this.ui.querySelector('#game-score')
       sc.textContent = g.started || g.score[0] + g.score[1] ? `${g.score[0]}  —  ${g.score[1]}` : ''
-      // raketler
+      // raketler — kamera açıksa yüzün rakette!
       for (const p of g.players) {
         const pad = g.pads[p.code]
         if (!pad) continue
-        ctx.beginPath()
-        ctx.fillStyle = p.side === 0 ? tq : '#0ea5e9'
-        ctx.arc(x(pad.x), y(pad.y), x(md.padR), 0, Math.PI * 2)
-        ctx.fill()
-        ctx.fillStyle = '#06231f'
-        ctx.font = `700 ${Math.max(11, x(20))}px system-ui`
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        const av = avatarOf(p.code)
-        ctx.fillText(av || (p.name || '?')[0].toUpperCase(), x(pad.x), y(pad.y))
+        const col = p.side === 0 ? tq : '#0ea5e9'
+        const vid = this._videoFor(p.code)
+        if (vid) {
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(x(pad.x), y(pad.y), x(md.padR), 0, Math.PI * 2)
+          ctx.clip()
+          // kare kırp (cover) → daireye otur
+          const side = Math.min(vid.videoWidth, vid.videoHeight)
+          const sx = (vid.videoWidth - side) / 2; const sy = (vid.videoHeight - side) / 2
+          const d = x(md.padR) * 2
+          ctx.drawImage(vid, sx, sy, side, side, x(pad.x) - d / 2, y(pad.y) - d / 2, d, d)
+          ctx.restore()
+          ctx.beginPath() // takım rengi çerçeve
+          ctx.arc(x(pad.x), y(pad.y), x(md.padR), 0, Math.PI * 2)
+          ctx.strokeStyle = col; ctx.lineWidth = Math.max(2, x(5)); ctx.stroke()
+        } else {
+          ctx.beginPath()
+          ctx.fillStyle = col
+          ctx.arc(x(pad.x), y(pad.y), x(md.padR), 0, Math.PI * 2)
+          ctx.fill()
+          ctx.fillStyle = '#06231f'
+          ctx.font = `700 ${Math.max(11, x(20))}px system-ui`
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+          const av = avatarOf(p.code)
+          ctx.fillText(av || (p.name || '?')[0].toUpperCase(), x(pad.x), y(pad.y))
+        }
         ctx.fillStyle = 'rgba(255,255,255,.75)'
         ctx.font = `600 ${Math.max(10, x(14))}px system-ui`
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.fillText(p.name || '', x(pad.x), y(pad.y + md.padR + 18))
       }
       // pak/top

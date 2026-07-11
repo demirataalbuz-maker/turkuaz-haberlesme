@@ -360,6 +360,9 @@ async function main () {
   console.log('PASS: bas-konuş (PTT) kapısı çalışıyor (kapalı → bas aç → bırak kapan → açık)')
 
   console.log('--- 4d) Oyun modu: hava hokeyi (davet → katıl → fizik yayını → girdi → kapat)')
+  // teşhis kancaları: A'ya gelen oyun olayları + B'nin gönderdikleri
+  await pA.eval("window._gops = []; const _og = Games.onRoomEv.bind(Games); Games.onRoomEv = (m) => { window._gops.push((m.ev && m.ev.op) + ':' + String(m.from || '').slice(0, 6)); return _og(m) }; true")
+  await pB.eval("window._gsent = []; const _ev = Games.ev.bind(Games); Games.ev = (d) => { window._gsent.push(d.op); return _ev(d) }; true")
   await pA.eval("Games.host('hokey'); true")
   await pB.waitEval('B davet aldı', 'Games.g && !Games.g.started', 10000)
   await pB.eval('Games.join(); true')
@@ -367,13 +370,16 @@ async function main () {
   await pB.waitEval('oyun başladı (B)', 'Games.g && Games.g.started === true', 10000)
   await pB.eval('window._gs = Games.g.lastSeen; true')
   await pB.waitEval('host durum yayını akıyor', 'Games.g && Games.g.lastSeen > window._gs', 10000)
-  await pB.eval('Games._mouse = { x: 777, y: 300 }; true')
-  try {
-    await pA.waitEval('B raket girdisi host\'a ulaştı', `Games.g && Games.g.inputs['${codeB}'] && Games.g.inputs['${codeB}'].x === 777`, 10000)
-  } catch (e) {
-    console.log('A diag:', await pA.eval("JSON.stringify({ host: Games.isHost(), started: Games.g && Games.g.started, players: Games.g ? Games.g.players.map(p => p.code.slice(0, 6)) : null, inputs: Games.g ? Games.g.inputs : null })"))
-    console.log('B diag:', await pB.eval("JSON.stringify({ g: !!Games.g, started: Games.g && Games.g.started, spec: Games.g && Games.g.spectator, ui: !!Games.ui, mouse: Games._mouse, lastIn: Games._lastIn, int: !!Games._int, sameRoom: Games.g && Voice.room === Games.g.room })"))
-    throw e
+  await pB.eval('Games._mouse = { x: 777, y: 300 }; Games._lastIn = 0; Games.sendInput(); true')
+  let inOk = false
+  for (let i = 0; i < 20 && !inOk; i++) {
+    inOk = await pA.eval(`!!(Games.g && Games.g.inputs['${codeB}'] && Games.g.inputs['${codeB}'].x === 777)`)
+    await sleep(500)
+  }
+  if (!inOk) {
+    console.log('A diag:', await pA.eval("JSON.stringify({ host: Games.isHost(), started: Games.g && Games.g.started, players: Games.g ? Games.g.players.map(p => p.code.slice(0, 6)) : null, inputs: Games.g ? Games.g.inputs : null, gops: (window._gops || []).slice(-15) })"))
+    console.log('B diag:', await pB.eval("JSON.stringify({ g: !!Games.g, started: Games.g && Games.g.started, spec: Games.g && Games.g.spectator, ui: !!Games.ui, mouse: Games._mouse, lastIn: Games._lastIn, int: !!Games._int, sameRoom: Games.g && Voice.room === Games.g.room, gsent: (window._gsent || []).slice(-15), err: (window._err || []).slice(-5) })"))
+    fail('B raket girdisi host\'a ulaşmadı')
   }
   await pA.eval('Games.stop(); true')
   await pB.waitEval('oyun kapandı (B)', '!Games.g', 10000)
