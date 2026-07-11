@@ -57,7 +57,7 @@ jobs:
         # gradle-plugin'ini derlemeye kalkıp Kotlin uyumsuzluğuna çakılıyor.
         run: |
           tmp=$(mktemp -d)
-          (cd "$tmp" && gradle wrapper --gradle-version 8.10.2 --no-daemon)
+          (cd "$tmp" && touch settings.gradle && gradle wrapper --gradle-version 8.10.2 --no-daemon)
           cp -r "$tmp/gradlew" "$tmp/gradlew.bat" "$tmp/gradle" mobile/android/
 
       - name: APK derle (release, debug imzalı)
