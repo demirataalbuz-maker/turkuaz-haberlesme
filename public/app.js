@@ -924,13 +924,14 @@ function showDiag (withStart) {
   if (!d) {
     d = document.createElement('div')
     d.id = 'diag-pop'
-    d.innerHTML = `<div class="diag-head"><b>🔧 Tanılama</b><span class="diag-btns"><button id="diag-start" style="display:none">▶ Motoru başlat</button><button id="diag-copy">Kopyala</button><button id="diag-close">Kapat</button></span></div><pre id="diag-log"></pre>`
+    d.innerHTML = `<div class="diag-head"><b>🔧 Tanılama</b><span class="diag-btns"><button id="diag-start" style="display:none">▶ Motoru başlat</button><button id="diag-mini" style="display:none">🧪 Mini test</button><button id="diag-copy">Kopyala</button><button id="diag-close">Kapat</button></span></div><pre id="diag-log"></pre>`
     document.body.appendChild(d)
     d.querySelector('#diag-close').onclick = () => d.remove()
     d.querySelector('#diag-copy').onclick = () => copyText(coreLogs.join('\n'), d.querySelector('#diag-copy'), 'Kopyalandı ✓', 'Kopyala')
     d.querySelector('#diag-start').onclick = () => { requestEngine(); d.querySelector('#diag-start').style.display = 'none' }
+    d.querySelector('#diag-mini').onclick = () => { onCoreLog({ msg: '🧪 mini test istendi' }); send({ t: '__mini-test' }) }
   }
-  if (withStart) d.querySelector('#diag-start').style.display = ''
+  if (withStart) { d.querySelector('#diag-start').style.display = ''; d.querySelector('#diag-mini').style.display = '' }
   d.querySelector('#diag-log').textContent = coreLogs.length ? coreLogs.join('\n') : '(log yok)'
 }
 
