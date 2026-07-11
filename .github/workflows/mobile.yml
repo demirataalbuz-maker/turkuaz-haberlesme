@@ -78,4 +78,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "Turkuaz Android $GITHUB_REF_NAME" \
             --notes "Android APK (deneysel). İndirip kur: bilinmeyen kaynaklara izin vermen gerekir. Masaüstüyle aynı P2P ağına bağlanır." \
-            "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk"
+            "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk" \
+          || gh release upload "$GITHUB_REF_NAME" "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk" --clobber
