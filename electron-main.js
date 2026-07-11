@@ -95,17 +95,23 @@ async function start () {
     // fullscreen olmadan video.requestFullscreen() sessizce reddedilir (⛶/çift tık)
     cb(['media', 'notifications', 'display-capture', 'clipboard-sanitized-write', 'fullscreen', 'speaker-selection'].includes(permission))
   })
+  // desktopCapturer.getSources Wayland'da xdg-desktop-portal'a gider; portal
+  // takılırsa promise HİÇ dönmeyebiliyor → her çağrıyı zaman aşımıyla sar,
+  // yoksa ekran paylaşımı/uygulama donar.
+  const getSourcesSafe = (opts, ms = 4000) => Promise.race([
+    desktopCapturer.getSources(opts),
+    new Promise(resolve => setTimeout(() => resolve([]), ms))
+  ]).catch(() => [])
+
   // Ekran paylaşımında birincil ekranı ver (kendi seçim arayüzümüz yok)
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
-    desktopCapturer.getSources({ types: ['screen'] })
-      .then(sources => {
-        if (!sources.length) return cb({})
-        const res = { video: sources[0] }
-        // Sistem sesi: Chromium loopback yakalama şu an yalnızca Windows'ta
-        if (req.audioRequested && process.platform === 'win32') res.audio = 'loopback'
-        cb(res)
-      })
-      .catch(() => cb({}))
+    getSourcesSafe({ types: ['screen'] }).then(sources => {
+      if (!sources.length) return cb({})
+      const res = { video: sources[0] }
+      // Sistem sesi: Chromium loopback yakalama şu an yalnızca Windows'ta
+      if (req.audioRequested && process.platform === 'win32') res.audio = 'loopback'
+      cb(res)
+    })
   })
 
   if (await portInUse(PORT)) {
@@ -119,7 +125,7 @@ async function start () {
   // Ekran paylaşımı için kaynak (ekran) listesi — kendi seçicimizi göstermek için
   ipcMain.handle('turkuaz-get-sources', async () => {
     try {
-      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
+      const sources = await getSourcesSafe({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
       return sources.map(s => ({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL() }))
     } catch { return [] }
   })
