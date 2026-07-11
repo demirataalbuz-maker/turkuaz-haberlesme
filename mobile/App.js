@@ -80,13 +80,17 @@ export default function App () {
     }, 700)
   }
 
-  // WebView → Bare (motor henüz yoksa kuyruğa al, başlayınca akıt)
+  // WebView → Bare (motor henüz yoksa kuyruğa al, başlayınca akıt).
+  // '__engine-start' ARAYÜZDEN gelir: önceki açılış çökmüşse arayüz motoru
+  // BAŞLATMAZ (güvenli mod) — çökme döngüsü kırılır, loglar okunabilir kalır.
   const outboxRef = useRef([])
   const onMessage = (e) => {
     try {
+      const raw = e.nativeEvent.data
+      if (raw.includes('"__engine-start"')) { startBackend(); return }
       const ipc = ipcRef.current
-      if (ipc) ipc.write(e.nativeEvent.data + '\n')
-      else outboxRef.current.push(e.nativeEvent.data)
+      if (ipc) ipc.write(raw + '\n')
+      else outboxRef.current.push(raw)
     } catch (err) {
       logWeb('köprüye yazılamadı: ' + ((err && err.message) || err))
     }
@@ -116,7 +120,7 @@ export default function App () {
         originWhitelist={['*']}
         injectedJavaScriptBeforeContentLoaded={INJECT_BEFORE}
         onMessage={onMessage}
-        onLoadEnd={() => { onWebReady(); startBackend() }}
+        onLoadEnd={onWebReady}
         onShouldStartLoadWithRequest={onShouldStart}
         setSupportMultipleWindows={false}
         javaScriptEnabled

@@ -16,7 +16,12 @@ const EMOJI_SET = ['😀', '😁', '😂', '🤣', '😊', '😍', '😘', '😎
 // Gelen mesajları işle — taşıma (WebSocket / mobil köprü) transport.js'te.
 Transport.onMessage((m) => {
     switch (m.t) {
-      case 'state': state = m; gotState = true; render(); break
+      case 'state':
+        state = m
+        if (!gotState && window.TurkuazNative) { try { localStorage.setItem('tq.bootOk', 'ok') } catch {} }
+        gotState = true
+        render()
+        break
       case 'log': onCoreLog(m); break
       case 'history':
         histories[m.conv] = m.msgs
@@ -910,26 +915,49 @@ const coreLogs = []
 function onCoreLog (m) {
   coreLogs.push((m.level === 'error' ? '❌ ' : 'ℹ️ ') + (m.msg || ''))
   if (coreLogs.length > 60) coreLogs.shift()
+  try { localStorage.setItem('tq.prevLogs', JSON.stringify(coreLogs.slice(-40))) } catch {} // çökme sonrası okunabilsin
   ;(m.level === 'error' ? console.error : console.log)('[çekirdek]', m.msg)
   if (m.level === 'error') showDiag()
 }
-function showDiag () {
+function showDiag (withStart) {
   let d = $('diag-pop')
   if (!d) {
     d = document.createElement('div')
     d.id = 'diag-pop'
-    d.innerHTML = `<div class="diag-head"><b>🔧 Tanılama</b><span class="diag-btns"><button id="diag-copy">Kopyala</button><button id="diag-close">Kapat</button></span></div><pre id="diag-log"></pre>`
+    d.innerHTML = `<div class="diag-head"><b>🔧 Tanılama</b><span class="diag-btns"><button id="diag-start" style="display:none">▶ Motoru başlat</button><button id="diag-copy">Kopyala</button><button id="diag-close">Kapat</button></span></div><pre id="diag-log"></pre>`
     document.body.appendChild(d)
     d.querySelector('#diag-close').onclick = () => d.remove()
     d.querySelector('#diag-copy').onclick = () => copyText(coreLogs.join('\n'), d.querySelector('#diag-copy'), 'Kopyalandı ✓', 'Kopyala')
+    d.querySelector('#diag-start').onclick = () => { requestEngine(); d.querySelector('#diag-start').style.display = 'none' }
   }
+  if (withStart) d.querySelector('#diag-start').style.display = ''
   d.querySelector('#diag-log').textContent = coreLogs.length ? coreLogs.join('\n') : '(log yok)'
 }
-// mobilde çekirdekten 8 sn'de durum gelmezse tanılamayı kendiliğinden aç
-if (window.TurkuazNative) {
+
+// ---- mobil: motoru arayüz başlatır (güvenli mod çökme döngüsünü kırar) ----
+let engineRequested = false
+function requestEngine () {
+  if (engineRequested) return
+  engineRequested = true
+  send({ t: '__engine-start' })
   setTimeout(() => {
-    if (!gotState) { coreLogs.push('❌ Çekirdekten 8 sn içinde durum gelmedi — P2P motoru başlamamış olabilir'); showDiag() }
-  }, 8000)
+    if (!gotState) { coreLogs.push('❌ Motor istendi ama 10 sn içinde durum gelmedi'); showDiag() }
+  }, 10000)
+}
+if (window.TurkuazNative) {
+  let prev = []
+  try { prev = JSON.parse(localStorage.getItem('tq.prevLogs') || '[]') } catch {}
+  const lastBoot = localStorage.getItem('tq.bootOk')
+  try { localStorage.setItem('tq.bootOk', 'pending') } catch {}
+  if (lastBoot === 'pending') {
+    // önceki oturum sağlıklı duruma ulaşamadan bitmiş (büyük olasılıkla çökme)
+    coreLogs.push('⚠️ ÖNCEKİ oturum çökmüş görünüyor. Son oturumun kayıtları:')
+    for (const l of prev) coreLogs.push('   ' + l)
+    coreLogs.push('▶ Motor güvenli modda BEKLETİLİYOR — logları kopyala, sonra istersen "Motoru başlat".')
+    showDiag(true)
+  } else {
+    requestEngine()
+  }
 }
 
 // ---- mobil güncelleme kontrolü: yeni APK çıktıysa şerit göster ----
