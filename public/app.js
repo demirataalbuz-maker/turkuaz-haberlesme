@@ -553,6 +553,14 @@ function renderMessages () {
       sep.className = 'day-sep'; sep.textContent = day
       box.appendChild(sep); lastDay = day; lastFrom = null
     }
+    if (m.call) { // arama kaydı: balon değil, ortalanmış sistem satırı
+      const sys = document.createElement('div')
+      sys.className = 'sys-row'
+      sys.textContent = m.text + ' · ' + fmtTime(m.ts)
+      box.appendChild(sys)
+      lastFrom = null; lastTs = m.ts
+      continue
+    }
     const compact = m.from === lastFrom && m.ts - lastTs < 5 * 60 * 1000 && !m.deleted
     const row = document.createElement('div')
     const pending = pendingIds.has(m.id)

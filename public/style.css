@@ -874,3 +874,6 @@ button { font-family: inherit; }
 @keyframes pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; } }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, .5); } 50% { box-shadow: 0 0 0 14px rgba(45, 212, 191, 0); } }
 @keyframes blink { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+/* Arama kaydı: mesaj balonu değil, ortalanmış sistem satırı */
+.sys-row { text-align: center; color: var(--tx3); font-size: 12px; margin: 10px 0; user-select: none; }

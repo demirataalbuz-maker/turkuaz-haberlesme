@@ -9,13 +9,18 @@ Bağlantılar kişiye özel kriptografik kodlarla kurulur, uçtan uca şifrelidi
 - **DM**: mesaj, düzenle/sil, emoji reaksiyon, yazıyor göstergesi,
   offline kuyruk (karşı taraf gelince teslim + ack), dosya/resim gönderme
 - **Odalar**: davet koduyla katılım, **kanallar** (#genel, #müzik...),
-  **geçmiş senkronu** (sonradan katılan eski mesajları online üyelerden çeker),
-  **imzalı moderasyon** (oda sahibi kriptografik imzayla yasaklar; herkes imzayı
-  doğrular, banlının mesajları düşer)
+  **imzalı mesajlar** (her oda mesajı yazarın anahtarıyla imzalanır),
+  **geçmiş senkronu** (sonradan katılan eski mesajları online üyelerden çeker;
+  imzasız/sahte satırlar reddedilir), **imzalı moderasyon** (oda sahibi
+  kriptografik imzayla yasaklar; herkes imzayı doğrular, banlının mesajları düşer)
 - **Ses/görüntü**: odada sesli sohbet + **oturma odası** (balonunu sürükle,
-  sesler konuma göre yönlü gelir — HRTF), kamera, **ekran paylaşımı**,
-  konuşma göstergesi, RNNoise güçlü gürültü engelleme, bağlantı kalite göstergesi,
-  kalıcı ses dock'u ve DM'den **birebir arama** (native bildirim, kabul/red)
+  sesler konuma göre yönlü gelir — HRTF), kamera (480p/720p/1080p),
+  **ekran paylaşımı** (720p→4K, ayarlanabilir FPS, adaptif bitrate — ağ
+  daralınca görüntü kısılır ses korunur), video codec seçimi (H264 = GPU
+  encode, oyun dostu / AV1), konuşma göstergesi, RNNoise gürültü engelleme
+  (AudioWorklet — arayüz yoğunken ses çıtırdamaz), bağlantı kalite göstergesi,
+  kalıcı ses dock'u ve DM'den **birebir arama** (native bildirim, kabul/red,
+  arama geçmişi sohbete işlenir)
 - **Oyun kullanımı**: pencere arkasında da çalışan `Ctrl+Shift+M` sustur/aç,
   odak kaybında güvenli kapanan PTT ve sekiz hazır efektli ses paneli
 - **Profil**: emoji avatar + özel durum
@@ -68,12 +73,12 @@ Her iki paket de kendini otomatik günceller (aşağıya bak).
 
 ## Otomatik güncelleme
 
-NSIS ile kurulmuş Windows uygulaması ve Linux AppImage, açılıştan 15 saniye
-sonra ve ardından 4 saatte bir son **stable** GitHub Release'i denetler. Bu bir
-push bildirimi değildir; yeni sürüm bulununca arka planda iner, uygulama içindeki
-şerit yüzdeyi gösterir ve indirme bitince sistem bildirimi gelir. Ayarlar →
-Gelişmiş'ten elle denetleyebilir, şeritten/ayarlardan/tepsiden **Yeniden başlat ve
-güncelle** diyebilirsin.
+NSIS ile kurulmuş Windows uygulaması ve Linux AppImage, açılıştan 3 saniye
+sonra ve ardından 30 dakikada bir son **stable** GitHub Release'i denetler.
+Yeni sürüm arka planda iner, şerit yüzdeyi gösterir; indirme bitince **15
+saniyelik görünür geri sayımla kendini kurup yeniden açılır**. Aramadaysan
+sayaç arama bitene kadar bekler; ✕ (Sonra) dersen kurulum normal çıkışa
+kalır. Ayarlar → Gelişmiş'ten elle de denetleyebilirsin.
 
 "Sonra" dersen güncelleme gerçek uygulama çıkışında kurulur. Pencerenin X'i
 Turkuaz'ı kapatmaz, tepsiye gizler; gerçek çıkış için tepsi → Çıkış'ı kullan.
@@ -158,9 +163,26 @@ uygulamadaki ⇄ (Hesabı taşı) butonunu kullan.
 
 - Kimlik = Ed25519 anahtar çifti; arkadaş kodu = public key. Taklit edilemez.
 - `identity.json` içindeki `seed` kimliğindir — paylaşma, yedeğini güvenli tut.
-- Oda güvenliği = davet kodunun gizliliği. Moderasyon imzaları oda sahibinin
-  anahtarıyla doğrulanır; sahte ban listesi yayılamaz.
+  (Kayıt atomik yazılır: çökme/elektrik kesintisi dosyayı bozamaz.)
+- Oda güvenliği = davet kodunun gizliliği. Her oda mesajı yazarın anahtarıyla
+  imzalanır: geçmiş aktarımında kimse başkasının ağzından mesaj uyduramaz
+  (v0.5.1 öncesi imzasız eski satırlar yeni üyelere aktarılmaz). Moderasyon
+  imzaları oda sahibinin anahtarıyla doğrulanır; sahte ban listesi yayılamaz.
+- Paylaşılan dosyalar `/files`'tan yalnız bilinen zararsız türlerde tarayıcıda
+  açılır (`nosniff`); HTML/SVG gibi script çalıştırabilecek her şey indirme
+  olarak iner.
 - Arayüz sadece `127.0.0.1` dinler.
+- **Gizlilik notu:** varsayılan yapılandırmada medya, doğrudan bağlantı
+  kurulamazsa ücretsiz public bir TURN rölesinden geçer (içerik DTLS-SRTP
+  şifreli — röle göremez, ama bağlantı meta verisi oradan akar). İstemiyorsan
+  `TURKUAZ_NO_DEFAULT_TURN=1` ya da kendi TURN'ünü `ice.json`'a yaz.
+- Diskteki mesajlar şifresizdir: PC'ne erişimi olan herkes okuyabilir
+  (parolalı şifreleme yol haritasında).
+
+## Lisans
+
+GPL-3.0 — özgürce kullan, incele, değiştir, dağıt; türev çalışmalar da açık
+kaynak kalmak zorundadır. Tam metin: [LICENSE](LICENSE).
 
 ## Sınırlar (bilinçli)
 

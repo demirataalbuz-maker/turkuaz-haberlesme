@@ -1,6 +1,6 @@
 {
   "name": "turkuaz",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "GPL-3.0-only",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "desktopName": "Turkuaz.desktop",
@@ -26,7 +26,8 @@
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "dist:win": "electron-builder --win nsis --publish never",
     "release:check": "node scripts/check-release.js",
-    "test": "node test/updater.js && node test/update-artifacts.js && node test/e2e.js",
+    "test": "node test/updater.js && node test/update-artifacts.js && node test/core.js && node test/e2e.js",
+    "test:core": "node test/core.js",
     "test:updater": "node test/updater.js",
     "test:av": "node test/av.js",
     "test:voice:mesh": "node test/voice-mesh.js",
