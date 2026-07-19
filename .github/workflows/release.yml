@@ -1,32 +1,28 @@
-# Turkuaz sürüm derleme: bir sürüm etiketi (ör. v0.3.2) push'landığında
-# Windows (.exe) ve Linux (AppImage) paketlerini KENDİ işletim sistemlerinde
-# derler ve GitHub Release'e (taslak) yükler. Sonra release'i elle "Publish"
-# edince oto-update bütün kurulumlara dağıtır.
-#
-# Kullanım:
-#   npm version patch        # sürümü yükseltir + git tag oluşturur (vX.Y.Z)
-#   git push --follow-tags    # tag'i push'la → bu akış tetiklenir
-# (ya da GitHub'da Actions sekmesinden "Run workflow" ile elle.)
-
-name: release
+# Turkuaz masaüstü sürümü: test et → iki platformu ayrı derle → tek taslak
+# release'e birlikte yükle. Taslak elle Publish edilene kadar updater görmez.
+name: desktop-release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch: {}
 
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write        # GITHUB_TOKEN'ın release oluşturup dosya yükleyebilmesi için
+  contents: read
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  validate:
+    name: Test ve sürüm doğrulama
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -36,10 +32,128 @@ jobs:
       - name: Bağımlılıkları kur
         run: npm ci
 
-      - name: Derle ve yayınla (kendi OS hedefi)
-        # Platform bayrağı yok: electron-builder çalıştığı OS'un hedefini derler
-        # (ubuntu → AppImage, windows → nsis .exe). Her ikisi de aynı sürüm
-        # etiketli taslak release'e yüklenir.
-        run: npx --no-install electron-builder --publish always
+      - name: Tag, sürüm ve updater sözleşmesi
+        run: npm run release:check
+
+      - name: Çekirdek + updater testleri
+        run: npm test
+
+      - name: Bare/mobil ortak çekirdek testi
+        run: npm run test:bare
+
+      - name: Electron ses, görüntü ve arayüz testi
+        run: xvfb-run -a npm run test:av
+
+  build:
+    name: Derle · ${{ matrix.platform }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            args: --linux AppImage
+          - os: windows-latest
+            platform: windows
+            args: --win nsis
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bağımlılıkları kur
+        run: npm ci
+
+      - name: Windows imzalama secret'larını doğrula
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            throw "WIN_CSC_LINK ve WIN_CSC_KEY_PASSWORD secret'ları olmadan Windows release üretilemez."
+          }
+
+      - name: Paketi üret (henüz yayınlama)
+        run: npx --no-install electron-builder ${{ matrix.args }} --publish never
+        env:
+          # Windows job'unda zorunludur; forceCodeSigning imzasız paketi reddeder.
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Update manifesti, boyut ve SHA-512 doğrula
+        run: node scripts/verify-update-artifacts.js ${{ matrix.platform }}
+
+      - name: Windows Authenticode imzasını doğrula
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/Turkuaz-Setup-*.exe | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer bulunamadı." }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($signature.Status -ne 'Valid') { throw "Geçersiz Windows imzası: $($signature.Status)" }
+          Write-Host "Windows publisher: $($signature.SignerCertificate.Subject)"
+
+      - name: Linux release dosyalarını sakla
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          if-no-files-found: error
+          path: |
+            dist/Turkuaz.AppImage
+            dist/latest-linux.yml
+
+      - name: Windows release dosyalarını sakla
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          if-no-files-found: error
+          path: |
+            dist/Turkuaz-Setup-*.exe
+            dist/Turkuaz-Setup-*.exe.blockmap
+            dist/latest.yml
+
+  publish-draft:
+    name: Tek taslak release oluştur
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Beş updater dosyasını taslağa yükle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "Yayınlanmış release değiştirilmeyecek: $RELEASE_TAG"
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --draft --generate-notes --title "Turkuaz ${RELEASE_TAG#v}"
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          echo "Taslak hazır. Windows ve Linux kabul testinden sonra GitHub'da Publish release seç."

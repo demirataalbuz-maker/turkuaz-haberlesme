@@ -18,10 +18,10 @@ function rtcConfig () {
 
 // ---- ayarlardan medya kısıtları (cihaz seçimi, ekran çözünürlüğü/FPS/ses) ----
 function _settings () { return (window.TurkuazSettings && TurkuazSettings.get()) || {} }
-function micConstraints () {
+function micConstraints (forceStandard = false) {
   const s = _settings()
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
-  const audio = { echoCancellation: true, noiseSuppression: (s.noise || 'standard') === 'standard', autoGainControl: true }
+  const audio = { echoCancellation: true, noiseSuppression: forceStandard || (s.noise || 'standard') === 'standard', autoGainControl: true }
   if (s.micId) audio.deviceId = { exact: s.micId }
   return { audio }
 }
@@ -67,26 +67,68 @@ async function getScreenStream () {
 }
 function pickScreen (sources) {
   return new Promise((resolve) => {
+    const returnFocus = document.activeElement
     const back = document.createElement('div'); back.className = 'modal-back'
+    back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-label', 'Paylaşılacak ekranı seç')
     const modal = document.createElement('div'); modal.className = 'modal'; modal.style.width = '640px'
     modal.innerHTML = '<h2>Hangi ekranı paylaşayım?</h2><div class="screen-grid"></div><div class="modal-btns"><button class="cancel">Vazgeç</button></div>'
     const grid = modal.querySelector('.screen-grid')
+    let done = false
+    const finish = (value) => {
+      if (done) return
+      done = true
+      document.removeEventListener('keydown', onKey, true)
+      back.remove()
+      if (typeof syncDialogInert === 'function') syncDialogInert()
+      setTimeout(() => {
+        const top = typeof topVisibleModal === 'function' && topVisibleModal()
+        if (top) {
+          const target = typeof modalFocusables === 'function' && modalFocusables(top)[0]
+          if (target) target.focus()
+        } else if (returnFocus && returnFocus.isConnected && !returnFocus.closest('[inert]') && returnFocus.focus) returnFocus.focus()
+      }, 0)
+      resolve(value)
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape' && (typeof topVisibleModal !== 'function' || topVisibleModal() === back)) {
+        e.preventDefault(); e.stopImmediatePropagation(); finish(null)
+      }
+    }
     for (const s of sources) {
-      const item = document.createElement('div'); item.className = 'screen-opt'
+      const item = document.createElement('button'); item.type = 'button'; item.className = 'screen-opt'
+      item.setAttribute('aria-label', s.name + ' ekranını paylaş')
       const img = document.createElement('img'); img.src = s.thumb; img.alt = ''
       const label = document.createElement('span'); label.textContent = s.name
       item.append(img, label)
-      item.onclick = () => { back.remove(); resolve(s.id) }
+      item.onclick = () => finish(s.id)
       grid.appendChild(item)
     }
-    modal.querySelector('.cancel').onclick = () => { back.remove(); resolve(null) }
+    modal.querySelector('.cancel').onclick = () => finish(null)
+    back.onclick = (e) => { if (e.target === back) finish(null) }
+    document.addEventListener('keydown', onKey, true)
     back.appendChild(modal); document.body.appendChild(back)
+    if (typeof syncDialogInert === 'function') syncDialogInert()
+    setTimeout(() => grid.querySelector('.screen-opt')?.focus(), 0)
   })
 }
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
-  const raw = await navigator.mediaDevices.getUserMedia(micConstraints())
+  const wantsStrong = _settings().noise === 'strong'
+  const rnnoiseReady = !!(window.RNNoise && window.RNNoise.ready)
+  let constraints = micConstraints(wantsStrong && !rnnoiseReady)
+  let raw
+  try {
+    raw = await navigator.mediaDevices.getUserMedia(constraints)
+  } catch (err) {
+    // Kaydedilmiş cihaz çıkarılmış/değişmiş olabilir. Oyun başlayınca kullanıcıyı
+    // ayarlara mahkûm etmeden varsayılan mikrofona güvenli biçimde düş.
+    if (!_settings().micId) throw err
+    constraints = micConstraints(wantsStrong && !rnnoiseReady)
+    delete constraints.audio.deviceId
+    raw = await navigator.mediaDevices.getUserMedia(constraints)
+    if (window.toast) toast('Seçili mikrofon bulunamadı; varsayılan mikrofon kullanılıyor.', 'warn', 5000)
+  }
   obj.micRaw = raw
   const Ctx = window.AudioContext || window.webkitAudioContext
   if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise 48 kHz ister
@@ -97,15 +139,32 @@ async function buildMic (obj) {
   const dest = obj.ctx.createMediaStreamDestination()
   // AI gürültü engelleme (RNNoise): 'strong' modda ve motor hazırsa zincire gir
   let head = src
-  if (_settings().noise === 'strong' && window.RNNoise && window.RNNoise.ready) {
+  if (wantsStrong && rnnoiseReady) {
     const dn = window.RNNoise.makeDenoiseNode(obj.ctx)
     if (dn) { src.connect(dn); head = dn; obj._denoise = dn }
+  } else if (wantsStrong && window.toast) {
+    toast('AI gürültü engelleme henüz hazır değil; bu katılımda standart koruma kullanılıyor.', 'warn', 5000)
   }
   head.connect(obj.inGain); obj.inGain.connect(dest)
   return dest.stream
 }
 
 const LR_SCALE = 8
+const VOICE_HEARTBEAT_MS = 5000
+const VOICE_STALE_MS = 18000
+const VOICE_STATS_MS = 4000
+
+function tuneAudioSender (sender) {
+  if (!sender || !sender.getParameters || !sender.setParameters) return
+  try {
+    const p = sender.getParameters()
+    if (!p.encodings || !p.encodings.length) p.encodings = [{}]
+    // 10 kişide kişi başı 9 uplink: Opus kalitesini korurken toplam gönderimi
+    // ev bağlantılarında rahat tutan üst sınır.
+    p.encodings[0].maxBitrate = 64000
+    sender.setParameters(p).catch(() => {})
+  } catch {}
+}
 
 // ============================================================
 // Oda sesli sohbeti + oturma odası
@@ -121,6 +180,8 @@ const Voice = {
   ctx: null,
   master: null,
   hb: null,
+  statsTimer: null,
+  joining: false,
   seen: new Map(),
   _myAnalyser: null,
 
@@ -129,15 +190,37 @@ const Voice = {
   defaultPos (code) {
     let h = 0
     for (const c of code) h = (h * 33 + c.charCodeAt(0)) >>> 0
-    return { x: 12 + (h % 77), y: 28 + ((h >> 7) % 46) }
+    // `>>` 32 bit hash'in yüksek biti set olduğunda negatif değer üretir ve
+    // balonu sahnenin üstüne taşır. Unsigned kaydırma + güvenli kenar payları.
+    return { x: 14 + (h % 73), y: 27 + ((h >>> 7) % 43) }
   },
 
   seenMap (room) {
     if (!this.seen.has(room)) this.seen.set(room, new Map())
     return this.seen.get(room)
   },
+  markSeen (room, code, name) {
+    this.seenMap(room).set(code, { name: name || 'anon', lastSeen: Date.now() })
+  },
+  pruneSeen () {
+    const now = Date.now()
+    let changed = false
+    for (const [room, peers] of this.seen) {
+      for (const [code, info] of peers) {
+        if (now - (info.lastSeen || 0) <= VOICE_STALE_MS) continue
+        const member = room === this.room && this.members.get(code)
+        // Aktif WebRTC sesi çalışıyorsa yalnız heartbeat gecikmiştir; kesme.
+        if (member && member.pc && member.pc.connectionState === 'connected') continue
+        peers.delete(code)
+        if (member) this.removeMember(code)
+        changed = true
+      }
+      if (!peers.size) this.seen.delete(room)
+    }
+    if (changed) this.sync()
+  },
 
-  sendRtc (to, data) { send({ t: 'rtc', to, data }) },
+  sendRtc (to, data) { send({ t: 'rtc', to, data: { ...data, room: this.room } }) },
 
   stateEv () {
     return {
@@ -163,15 +246,23 @@ const Voice = {
 
   async join () {
     if (!activeConv || activeConv.type !== 'room') return
+    if (this.joining || this.room === activeConv.topic) return
+    this.joining = true
+    this.sync()
     if (window.CallMgr && CallMgr.state) CallMgr.end()
     if (this.room) this.leave()
     try {
       this.ctx = new AudioContext({ sampleRate: 48000 })
-      this.ctx.resume()
+      await this.ctx.resume()
       this.mic = await buildMic(this) // ham mikrofon → (RNNoise) → giriş kazancı → gönderilen akış
+      this.setSink(_settings().spkId || '')
     } catch (e) {
       if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
-      alert('Mikrofona erişilemedi: ' + e.message); return
+      this.joining = false
+      this.sync()
+      const message = 'Mikrofona erişilemedi: ' + e.message
+      if (window.toast) toast(message, 'error', 6000); else alert(message)
+      return
     }
     this.master = this.ctx.createGain()
     this.master.gain.value = (Number(_settings().outVol) || 100) / 100
@@ -183,10 +274,21 @@ const Voice = {
     this.room = activeConv.topic
     this.muted = false
     this.myPos = this.defaultPos(this.code())
+    const rawTrack = this.micRaw && this.micRaw.getAudioTracks()[0]
+    if (rawTrack) {
+      rawTrack.onended = () => {
+        if (!this.room) return
+        if (window.toast) toast('Mikrofon bağlantısı kesildi; sesli sohbetten ayrıldın.', 'error', 6000)
+        this.leave()
+      }
+    }
     this.sendState()
-    this.hb = setInterval(() => this.sendState(), 8000)
+    this.hb = setInterval(() => this.sendState(), VOICE_HEARTBEAT_MS)
+    this.statsTimer = setInterval(() => this.sampleStats(), VOICE_STATS_MS)
     this._speakInt = setInterval(() => this.speakTick(), 180)
     this._startGate() // konuşma moduna göre mikrofon kapısı
+    this.joining = false
+    if (window.toast) toast('Sesli sohbete bağlandın.', 'success')
     this.sync()
   },
 
@@ -195,16 +297,19 @@ const Voice = {
     if (window.Games) Games.onVoiceLeave() // oyun açıksa kapat (oyuncuysak herkes için bitir)
     send({ t: 'room-ev', room: this.room, ev: { kind: 'voice', on: false } })
     clearInterval(this.hb)
+    clearInterval(this.statsTimer)
+    this.statsTimer = null
     clearInterval(this._speakInt)
     this._stopGate()
     for (const code of [...this.members.keys()]) this.removeMember(code)
     for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
-      if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
+      if (this[s]) { this[s].getTracks().forEach(t => { t.onended = null; t.stop() }); this[s] = null }
     }
     if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
+    this.joining = false
     this.myPos = null
     this._myBubble = null
     this.sync()
@@ -249,20 +354,29 @@ const Voice = {
         e.preventDefault(); this._micGate(true)
       }
       this._pttUp = (e) => { if (e.code === key()) this._micGate(false) }
+      // Pencere odağı oyun/Alt+Tab nedeniyle giderken keyup kaybolursa mikrofon
+      // açık takılmasın. Global basılı-tut PTT gelene kadar güvenli davranış bu.
+      this._pttBlur = () => this._micGate(false)
       document.addEventListener('keydown', this._pttDown)
       document.addEventListener('keyup', this._pttUp)
+      window.addEventListener('blur', this._pttBlur)
     }
   },
   _stopGate () {
     if (this._gateInt) { clearInterval(this._gateInt); this._gateInt = null }
     if (this._pttDown) { document.removeEventListener('keydown', this._pttDown); this._pttDown = null }
     if (this._pttUp) { document.removeEventListener('keyup', this._pttUp); this._pttUp = null }
+    if (this._pttBlur) { window.removeEventListener('blur', this._pttBlur); this._pttBlur = null }
   },
 
   // ---- ayar ekranından canlı uygulanan ses kontrolleri ----
   setOutputVolume (pct) { if (this.master) this.master.gain.value = Math.max(0, Number(pct) || 0) / 100 },
   setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
-  setSink (id) { try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {} },
+  setSink (id) {
+    try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {}
+    const theater = this.el('theater-video')
+    try { if (theater && theater.setSinkId) theater.setSinkId(id || '').catch(() => {}) } catch {}
+  },
 
   // ---- kişi-bazlı ses (Discord gibi her katılımcı ayrı ayarlanır) ----
   _userVols: null,
@@ -298,7 +412,11 @@ const Voice = {
     if (!this.cam) {
       try {
         this.cam = await navigator.mediaDevices.getUserMedia(camConstraints())
-      } catch (e) { alert('Kameraya erişilemedi: ' + e.message); return }
+      } catch (e) {
+        const message = 'Kameraya erişilemedi: ' + e.message
+        if (window.toast) toast(message, 'error', 6000); else alert(message)
+        return
+      }
       const track = this.cam.getVideoTracks()[0]
       track.onended = () => { if (this.cam) this.toggleCam() }
       for (const m of this.members.values()) m.pc.addTrack(track, this.mic)
@@ -316,7 +434,10 @@ const Voice = {
     if (!this.screen) {
       try {
         this.screen = await getScreenStream()
-      } catch { return }
+      } catch (e) {
+        if (e && e.message !== 'picker-iptal' && window.toast) toast('Ekran paylaşımı başlatılamadı: ' + e.message, 'error', 6000)
+        return
+      }
       const track = this.screen.getVideoTracks()[0]
       track.onended = () => { if (this.screen) this.toggleScreen() }
       // tüm parçalar (sistem sesi dahil) gitsin
@@ -351,7 +472,9 @@ const Voice = {
       screenSid: null,
       srcNode: null, panner: null, analyser: null, audioEl: null,
       bubble: null, makingOffer: false,
-      polite: this.code() > code
+      polite: this.code() > code,
+      pendingIce: [], recoveryTimer: null, restarted: false,
+      quality: 'connecting', rtt: null, jitter: null, loss: null, _packetBase: null
     }
     this.members.set(code, m)
     this.createPC(m)
@@ -362,7 +485,10 @@ const Voice = {
   createPC (m) {
     const pc = new RTCPeerConnection(rtcConfig())
     m.pc = pc
-    for (const track of this.mic.getTracks()) pc.addTrack(track, this.mic)
+    for (const track of this.mic.getTracks()) {
+      const sender = pc.addTrack(track, this.mic)
+      if (track.kind === 'audio') tuneAudioSender(sender)
+    }
     if (this.cam) pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
     if (this.screen) for (const t of this.screen.getTracks()) pc.addTrack(t, this.screen)
 
@@ -391,8 +517,26 @@ const Voice = {
     }
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState
-      if (st === 'connected') m.restarted = false
+      if (st === 'connected') {
+        m.restarted = false
+        m.quality = 'good'
+        clearTimeout(m.recoveryTimer)
+        m.recoveryTimer = null
+      }
+      if (st === 'disconnected') {
+        m.quality = 'warn'
+        clearTimeout(m.recoveryTimer)
+        m.recoveryTimer = setTimeout(() => {
+          if (!this.members.has(m.code) || m.pc !== pc || pc.connectionState !== 'disconnected') return
+          if (!m.restarted) {
+            m.restarted = true
+            try { pc.restartIce() } catch { this.removeMember(m.code) }
+            this.sync()
+          }
+        }, 3500)
+      }
       if (st === 'failed') {
+        m.quality = 'bad'
         // İlk çare: aynı bağlantıda ICE'ı tazele; ikinci kez düşerse üyeyi çıkar
         // (karşı tarafın 8 sn'lik durum kalp atışı üyeyi yeniden kurar = tekrar dene)
         if (!m.restarted) { m.restarted = true; try { pc.restartIce() } catch { this.removeMember(m.code); return } } else { this.removeMember(m.code); return }
@@ -439,6 +583,7 @@ const Voice = {
   removeMember (code) {
     const m = this.members.get(code)
     if (!m) return
+    clearTimeout(m.recoveryTimer)
     try { m.pc.close() } catch {}
     try { m.srcNode && m.srcNode.disconnect() } catch {}
     try { m.panner && m.panner.disconnect() } catch {}
@@ -468,11 +613,27 @@ const Voice = {
     if (window.Soundboard) Soundboard.play('toink')
   },
   // Verilen (benim) pozisyonu diğer balonların dışına itele (px uzayında)
+  clampPos (pos) {
+    const stage = this.el('lr-stage')
+    const r = stage && stage.getBoundingClientRect()
+    if (!r || r.width < 10 || r.height < 10) {
+      return { x: Math.min(88, Math.max(12, Number(pos.x) || 50)), y: Math.min(72, Math.max(27, Number(pos.y) || 50)) }
+    }
+    // 86px yüz + ad etiketi tamamen sahnede kalsın; kısa/dar pencerede payı
+    // yüzdeye dinamik çevirerek sürüklenen balonların kesilmesini engelle.
+    const padX = Math.min(24, Math.max(6, 50 / r.width * 100))
+    const padTop = Math.min(40, Math.max(18, 50 / r.height * 100))
+    const padBottom = Math.min(45, Math.max(20, 62 / r.height * 100))
+    return {
+      x: Math.min(100 - padX, Math.max(padX, Number(pos.x) || 50)),
+      y: Math.min(100 - padBottom, Math.max(padTop, Number(pos.y) || 50))
+    }
+  },
   resolveCollision (pos, R = 80) {
     const stage = this.el('lr-stage')
-    if (!stage) return pos
+    if (!stage) return this.clampPos(pos)
     const r = stage.getBoundingClientRect()
-    if (r.width < 10 || r.height < 10) return pos
+    if (r.width < 10 || r.height < 10) return this.clampPos(pos)
     let x = pos.x / 100 * r.width
     let y = pos.y / 100 * r.height
     for (let iter = 0; iter < 3; iter++) {
@@ -492,10 +653,7 @@ const Voice = {
       }
       if (!moved) break
     }
-    return {
-      x: Math.min(96, Math.max(4, x / r.width * 100)),
-      y: Math.min(88, Math.max(10, y / r.height * 100))
-    }
+    return this.clampPos({ x: x / r.width * 100, y: y / r.height * 100 })
   },
   // Biri üstüme gelirse kendimi kenara kaydır (küçük histerezisle — ping-pong olmasın)
   avoidOverlap () {
@@ -518,9 +676,94 @@ const Voice = {
     return dev
   },
   speakTick () {
-    if (this._myBubble) this._myBubble.classList.toggle('speaking', !this.muted && this._level(this._myAnalyser) > 10)
+    if (this._myBubble) this._myBubble.classList.toggle('speaking', !this.muted && this._gateOpen !== false && this._level(this._myAnalyser) > 10)
     for (const m of this.members.values()) {
       if (m.bubble) m.bubble.classList.toggle('speaking', this._level(m.analyser) > 10)
+    }
+  },
+
+  async sampleStats () {
+    for (const m of this.members.values()) {
+      const pc = m.pc
+      if (!pc || pc.connectionState !== 'connected') continue
+      try {
+        const reports = await pc.getStats()
+        let pair = null
+        let inbound = null
+        reports.forEach((r) => {
+          if (r.type === 'candidate-pair' && r.state === 'succeeded' && (r.nominated || !pair)) pair = r
+          if (r.type === 'inbound-rtp' && r.kind === 'audio' && !r.isRemote) inbound = r
+        })
+        m.rtt = pair && Number.isFinite(pair.currentRoundTripTime) ? pair.currentRoundTripTime : null
+        m.jitter = inbound && Number.isFinite(inbound.jitter) ? inbound.jitter : null
+        if (inbound) {
+          const received = Number(inbound.packetsReceived) || 0
+          const lost = Math.max(0, Number(inbound.packetsLost) || 0)
+          if (m._packetBase) {
+            const receivedDelta = Math.max(0, received - m._packetBase.received)
+            const lostDelta = Math.max(0, lost - m._packetBase.lost)
+            const totalDelta = receivedDelta + lostDelta
+            m.loss = totalDelta ? (lostDelta / totalDelta) * 100 : 0
+          }
+          m._packetBase = { received, lost }
+        }
+        const bad = (m.rtt != null && m.rtt > 0.3) || (m.jitter != null && m.jitter > 0.05) || (m.loss != null && m.loss > 5)
+        const warn = (m.rtt != null && m.rtt > 0.16) || (m.jitter != null && m.jitter > 0.03) || (m.loss != null && m.loss > 2)
+        m.quality = bad ? 'bad' : (warn ? 'warn' : 'good')
+      } catch {}
+    }
+    this.syncConnectionUI()
+  },
+
+  connectionSnapshot () {
+    const peers = [...this.members.values()]
+    const connected = peers.filter(m => m.pc && m.pc.connectionState === 'connected').length
+    let quality = 'good'
+    if (this.joining) quality = 'connecting'
+    else if (peers.some(m => m.quality === 'bad')) quality = 'bad'
+    else if (connected < peers.length) quality = 'connecting'
+    else if (peers.some(m => m.quality === 'warn')) quality = 'warn'
+    const total = peers.length + 1
+    const connectedTotal = connected + 1
+    let statusText
+    if (!peers.length) statusText = 'Tek başınasın · ses hazır'
+    else if (connected < peers.length) statusText = `${connectedTotal}/${total} kişi bağlandı`
+    else if (quality === 'bad') statusText = `${total} kişi · bağlantı zayıf`
+    else if (quality === 'warn') statusText = `${total} kişi · bağlantı dalgalı`
+    else statusText = `${total} kişi · bağlantı iyi`
+    const rtts = peers.map(m => m.rtt).filter(Number.isFinite)
+    const losses = peers.map(m => m.loss).filter(Number.isFinite)
+    const detail = [
+      rtts.length ? `gecikme ${Math.round(Math.max(...rtts) * 1000)} ms` : '',
+      losses.length ? `kayıp %${Math.max(...losses).toFixed(1)}` : ''
+    ].filter(Boolean).join(' · ')
+    return { quality, statusText, detail }
+  },
+
+  syncConnectionUI () {
+    const dock = this.el('voice-dock')
+    if (dock) {
+      dock.classList.toggle('hidden', !this.room)
+      if (this.room) {
+        const summary = this.connectionSnapshot()
+        const room = state.rooms.find(r => r.topic === this.room)
+        dock.dataset.quality = summary.quality
+        this.el('voice-dock-room').textContent = (room && room.name) || 'Sesli sohbet'
+        this.el('voice-dock-status').textContent = summary.statusText
+        dock.title = summary.detail
+        const mute = this.el('voice-dock-mute')
+        mute.classList.toggle('muted', this.muted)
+        mute.textContent = this.muted ? '🔇' : '🎙️'
+        mute.setAttribute('aria-pressed', this.muted ? 'true' : 'false')
+        mute.setAttribute('aria-label', this.muted ? 'Mikrofonun sesini aç' : 'Mikrofonu sustur')
+      }
+    }
+    const indicator = this.el('lr-connection')
+    if (indicator && this.room) {
+      const summary = this.connectionSnapshot()
+      indicator.dataset.quality = summary.quality
+      indicator.textContent = '● ' + summary.statusText
+      indicator.title = summary.detail
     }
   },
 
@@ -529,12 +772,15 @@ const Voice = {
     const k = data.kind || ''
     if (k.startsWith('call') || data.scope === 'call') return CallMgr.onRtc(from, data)
     if (!this.room || from === this.code()) return
+    // Eski oda/oturumdan gecikmiş SDP ve ICE yeni odaya karışmasın.
+    if (data.room && data.room !== this.room) return
     if (k === 'hello') {
+      this.markSeen(this.room, from, data.name)
       const m = this.ensureMember(from, data.name)
       m.muted = !!data.muted
       m.avatar = data.avatar || ''
       m.screenSid = data.screen || null
-      if (data.pos) { m.pos = data.pos; this.updatePanner(m); this.avoidOverlap() }
+      if (data.pos) { m.pos = this.clampPos(data.pos); this.updatePanner(m); this.avoidOverlap() }
       this.updateBubble(m)
       this.sync()
       return
@@ -543,15 +789,24 @@ const Voice = {
     const m = this.members.get(from)
     if (!m) return
     if (k === 'sdp') this.onSdp(m, data.desc)
-    if (k === 'ice') { try { m.pc.addIceCandidate(data.cand || undefined).catch(() => {}) } catch {} }
+    if (k === 'ice' && !m.ignoreOffer) {
+      if (!m.pc.remoteDescription) m.pendingIce.push(data.cand || null)
+      else { try { m.pc.addIceCandidate(data.cand || undefined).catch(() => {}) } catch {} }
+    }
   },
 
   async onSdp (m, desc) {
     const pc = m.pc
+    if (!desc || !desc.type) return
     try {
       const collision = desc.type === 'offer' && (m.makingOffer || pc.signalingState !== 'stable')
-      if (collision && !m.polite) return
+      m.ignoreOffer = collision && !m.polite
+      if (m.ignoreOffer) return
       await pc.setRemoteDescription(desc)
+      const queued = m.pendingIce.splice(0)
+      for (const cand of queued) {
+        try { await pc.addIceCandidate(cand || undefined) } catch {}
+      }
       if (desc.type === 'offer') {
         await pc.setLocalDescription()
         this.sendRtc(m.code, { kind: 'sdp', desc: pc.localDescription })
@@ -564,7 +819,7 @@ const Voice = {
     const rr = state.rooms.find(r => r.topic === room)
     if (rr && rr.banned && rr.banned.includes(from)) return
     if (ev.kind === 'voice') {
-      if (ev.on) this.seenMap(room).set(from, name)
+      if (ev.on) this.markSeen(room, from, name)
       else this.seenMap(room).delete(from)
       if (this.room === room) {
         if (!ev.on) { this.removeMember(from); return }
@@ -572,7 +827,7 @@ const Voice = {
         m.muted = !!ev.muted
         m.avatar = ev.avatar || m.avatar
         m.screenSid = ev.screen || null
-        if (ev.pos) { m.pos = ev.pos; this.updatePanner(m) }
+        if (ev.pos) { m.pos = this.clampPos(ev.pos); this.updatePanner(m) }
         this.updateBubble(m)
         this.sendRtc(from, { kind: 'hello', name: state.me.name, avatar: state.me.avatar, muted: this.muted, screen: this.screen ? this.screen.id : null, pos: this.myPos })
         this.sync()
@@ -582,7 +837,7 @@ const Voice = {
     if (ev.kind === 'pos' && this.room === room) {
       const m = this.members.get(from)
       if (!m) return
-      m.pos = { x: Number(ev.x) || 0, y: Number(ev.y) || 0 }
+      m.pos = this.clampPos({ x: Number(ev.x) || 0, y: Number(ev.y) || 0 })
       this.updatePanner(m)
       this.positionBubble(m)
       this.avoidOverlap() // üstüme geldiyse kenara kay (toink)
@@ -593,6 +848,7 @@ const Voice = {
   el (id) { return document.getElementById(id) },
 
   sync () {
+    this.syncConnectionUI()
     const lr = this.el('livingroom')
     if (!lr) return
     const inRoomView = activeConv && activeConv.type === 'room'
@@ -601,11 +857,14 @@ const Voice = {
     if (!inRoomView) return
     const topic = activeConv.topic
     const active = this.room === topic
+    const join = this.el('btn-voice-join')
+    join.disabled = this.joining
+    join.textContent = this.joining ? '⏳ Ses hazırlanıyor…' : '🎧 Sesli sohbete katıl'
 
     this.el('lr-overlay').classList.toggle('hidden', active)
     this.el('lr-controls').classList.toggle('hidden', !active)
     if (!active) {
-      const inside = [...this.seenMap(topic).values()]
+      const inside = [...this.seenMap(topic).values()].map(x => x.name)
       this.el('lr-who').textContent = inside.length
         ? 'İçeride: ' + inside.join(', ')
         : 'Henüz kimse yok — ilk katılan sen ol'
@@ -616,7 +875,8 @@ const Voice = {
 
     const mic = this.el('btn-mic')
     mic.textContent = this.muted ? '🔇 Sesi aç' : '🎙️ Sustur'
-    mic.classList.toggle('on', this.muted)
+    mic.classList.toggle('muted', this.muted)
+    mic.setAttribute('aria-pressed', this.muted ? 'true' : 'false')
     const cam = this.el('btn-cam')
     cam.textContent = this.cam ? '📷 Kamerayı kapat' : '📷 Kamera'
     cam.classList.toggle('on', !!this.cam)
@@ -642,6 +902,7 @@ const Voice = {
     th.classList.toggle('hidden', !stream)
     const v = this.el('theater-video')
     if (stream && v.srcObject !== stream) v.srcObject = stream
+    if (stream && v.setSinkId) v.setSinkId(_settings().spkId || '').catch(() => {})
     if (!stream) v.srcObject = null
     // Karşıdan gelen ekran SESİ buradan çalınır; kendi paylaşımın yankı yapmasın diye sessiz
     v.muted = !stream || stream === this.screen || !stream.getAudioTracks().length
@@ -742,6 +1003,18 @@ const CallMgr = {
   ringCtx: null, ringInt: null, tmo: null, t0: 0, timeInt: null, audioEl: null,
 
   sendRtc (to, data) { send({ t: 'rtc', to, data }) },
+  notifyIncoming () {
+    try {
+      const request = window.turkuazDesktop?.calls?.notifyIncoming?.(this.peerName)
+      if (request && typeof request.catch === 'function') request.catch(() => {})
+    } catch {}
+  },
+  clearIncomingNotification () {
+    try {
+      const request = window.turkuazDesktop?.calls?.clearIncoming?.()
+      if (request && typeof request.catch === 'function') request.catch(() => {})
+    } catch {}
+  },
   friendName (code) {
     const f = state.friends.find(x => x.code === code)
     return f ? (f.name || 'anon') : 'anon'
@@ -772,6 +1045,7 @@ const CallMgr = {
         this.state = 'in'
         this.polite = state.me.code > from
         this.showRing(this.peerName, 'seni arıyor...', true)
+        this.notifyIncoming()
         this.startRing(520, 0.5)
         this.tmo = setTimeout(() => this.reject(), 35000)
         break
@@ -801,6 +1075,7 @@ const CallMgr = {
     // (izin penceresi / meşgul aygıt) uzayınca zil arkada çalmaya devam ediyor,
     // 35 sn dolunca da arama kendi kendine kapanıyordu.
     this._accepting = true
+    this.clearIncomingNotification()
     this.stopRing()
     clearTimeout(this.tmo)
     document.getElementById('ring-sub').textContent = 'bağlanıyor…'
@@ -837,11 +1112,17 @@ const CallMgr = {
   begin () {
     this.stopRing()
     clearTimeout(this.tmo)
-    document.getElementById('modal-ring').classList.add('hidden')
+    if (typeof hideModal === 'function') hideModal('modal-ring', false)
+    else {
+      document.getElementById('modal-ring').classList.add('hidden')
+      document.getElementById('modal-ring').setAttribute('aria-hidden', 'true')
+    }
     this.state = 'active'
     this.makePC()
     this.t0 = Date.now()
-    document.getElementById('call-widget').classList.remove('hidden')
+    const widget = document.getElementById('call-widget')
+    widget.classList.remove('hidden')
+    widget.setAttribute('aria-hidden', 'false')
     document.getElementById('call-name').textContent = this.peerName
     this.timeInt = setInterval(() => {
       const el = document.getElementById('call-time')
@@ -855,6 +1136,13 @@ const CallMgr = {
         String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0')
     }, 1000)
     this.renderVideos()
+    setTimeout(() => {
+      if (!widget.inert) document.getElementById('call-end').focus()
+      else {
+        const settings = document.getElementById('settings')
+        if (settings && !settings.classList.contains('hidden')) document.getElementById('set-close').focus()
+      }
+    }, 0)
   },
 
   makePC () {
@@ -988,6 +1276,9 @@ const CallMgr = {
   },
 
   cleanup () {
+    const widget = document.getElementById('call-widget')
+    const restoreCallFocus = widget.contains(document.activeElement)
+    this.clearIncomingNotification()
     this.stopRing()
     clearTimeout(this.tmo)
     clearInterval(this.timeInt)
@@ -1005,15 +1296,25 @@ const CallMgr = {
     this._restarted = false
     this.state = null
     this.peer = null
-    document.getElementById('call-widget').classList.add('hidden')
-    document.getElementById('modal-ring').classList.add('hidden')
+    widget.classList.add('hidden')
+    widget.setAttribute('aria-hidden', 'true')
+    if (typeof hideModal === 'function') hideModal('modal-ring')
+    else {
+      document.getElementById('modal-ring').classList.add('hidden')
+      document.getElementById('modal-ring').setAttribute('aria-hidden', 'true')
+    }
+    if (restoreCallFocus) setTimeout(() => document.getElementById('btn-menu').focus(), 0)
   },
 
   showRing (name, sub, incoming) {
     document.getElementById('ring-name').textContent = name
     document.getElementById('ring-sub').textContent = sub
     document.getElementById('btn-ring-accept').style.display = incoming ? '' : 'none'
-    document.getElementById('modal-ring').classList.remove('hidden')
+    if (typeof showModal === 'function') showModal('modal-ring', incoming ? 'btn-ring-accept' : 'btn-ring-reject')
+    else {
+      document.getElementById('modal-ring').classList.remove('hidden')
+      document.getElementById('modal-ring').setAttribute('aria-hidden', 'false')
+    }
   },
 
   startRing (freq, gap) {
@@ -1048,6 +1349,12 @@ document.addEventListener('DOMContentLoaded', () => {
   Voice.el('btn-mic').onclick = () => Voice.toggleMute()
   Voice.el('btn-cam').onclick = () => Voice.toggleCam()
   Voice.el('btn-screen').onclick = () => Voice.toggleScreen()
+  Voice.el('voice-dock-return').onclick = () => {
+    const room = state.rooms.find(r => r.topic === Voice.room)
+    if (room && typeof openRoom === 'function') openRoom(room)
+  }
+  Voice.el('voice-dock-mute').onclick = () => Voice.toggleMute()
+  Voice.el('voice-dock-leave').onclick = () => Voice.leave()
   document.getElementById('btn-ring-accept').onclick = () => CallMgr.accept()
   document.getElementById('btn-ring-reject').onclick = () => (CallMgr.state === 'out' ? CallMgr.end() : CallMgr.reject())
   document.getElementById('call-mute').onclick = () => CallMgr.toggleMute()
@@ -1066,6 +1373,31 @@ document.addEventListener('DOMContentLoaded', () => {
   if (theaterVid) theaterVid.ondblclick = () => fs(theaterVid)
   const callRemote = document.getElementById('call-remote')
   if (callRemote) callRemote.ondblclick = () => fs(callRemote)
+
+  const toggleMuteShortcut = () => {
+    if (Voice.room) Voice.toggleMute()
+    else if (CallMgr.state === 'active') CallMgr.toggleMute()
+  }
+  // Electron globalShortcut uygulama odaktayken de çalışır; masaüstü köprüsü
+  // varsa ayrıca keydown dinlemeyerek tek basışta iki kez tetiklenmeyi önle.
+  const installLocalMuteShortcut = () => {
+    document.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey && e.shiftKey && e.code === 'KeyM') || e.repeat) return
+      e.preventDefault()
+      toggleMuteShortcut()
+    })
+  }
+  const shortcuts = window.turkuazDesktop?.shortcuts
+  if (shortcuts?.onToggleMute) {
+    shortcuts.onToggleMute(toggleMuteShortcut)
+    if (shortcuts.isGlobalMuteActive) {
+      shortcuts.isGlobalMuteActive().then(active => {
+        if (!active) installLocalMuteShortcut()
+      }).catch(installLocalMuteShortcut)
+    } else installLocalMuteShortcut()
+  } else installLocalMuteShortcut()
+  setInterval(() => Voice.pruneSeen(), VOICE_HEARTBEAT_MS)
+  Voice.sync()
 })
 
 window.addEventListener('beforeunload', () => {

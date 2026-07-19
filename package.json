@@ -1,7 +1,8 @@
 {
   "name": "turkuaz",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
+  "desktopName": "Turkuaz.desktop",
   "main": "electron-main.js",
   "imports": {
     "fs": {
@@ -21,14 +22,22 @@
     "start": "node server.js",
     "app": "electron .",
     "dist": "electron-builder --linux AppImage dir --publish never",
-    "release": "electron-builder --publish always",
-    "test": "node test/e2e.js",
+    "dist:linux": "electron-builder --linux AppImage --publish never",
+    "dist:win": "electron-builder --win nsis --publish never",
+    "release:check": "node scripts/check-release.js",
+    "test": "node test/updater.js && node test/update-artifacts.js && node test/e2e.js",
+    "test:updater": "node test/updater.js",
     "test:av": "node test/av.js",
+    "test:voice:mesh": "node test/voice-mesh.js",
     "test:bare": "node test/bare-smoke.js"
   },
   "build": {
     "appId": "dev.turkuaz.app",
     "productName": "Turkuaz",
+    "electronUpdaterCompatibility": ">=2.16",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "files": [
       "electron-main.js",
       "preload.js",
@@ -43,13 +52,16 @@
         "dir"
       ],
       "category": "Network",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Turkuaz.${ext}",
+      "syncDesktopName": true
     },
     "win": {
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "forceCodeSigning": true
     },
     "nsis": {
       "oneClick": false,
@@ -82,6 +94,7 @@
     "bare-path": "^3.0.0",
     "bare-process": "^4.5.1",
     "electron": "^43.1.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "js-yaml": "^4.3.0"
   }
 }

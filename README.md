@@ -14,7 +14,10 @@ Bağlantılar kişiye özel kriptografik kodlarla kurulur, uçtan uca şifrelidi
   doğrular, banlının mesajları düşer)
 - **Ses/görüntü**: odada sesli sohbet + **oturma odası** (balonunu sürükle,
   sesler konuma göre yönlü gelir — HRTF), kamera, **ekran paylaşımı**,
-  konuşma göstergesi, DM'den **birebir arama** (zil, kabul/red)
+  konuşma göstergesi, RNNoise güçlü gürültü engelleme, bağlantı kalite göstergesi,
+  kalıcı ses dock'u ve DM'den **birebir arama** (native bildirim, kabul/red)
+- **Oyun kullanımı**: pencere arkasında da çalışan `Ctrl+Shift+M` sustur/aç,
+  odak kaybında güvenli kapanan PTT ve sekiz hazır efektli ses paneli
 - **Profil**: emoji avatar + özel durum
 - **Arama**: Ctrl+K ile yerel geçmişte ara
 - **Hesap taşıma**: kimlik + arkadaşlar + odalar başka PC'ye taşınır;
@@ -35,40 +38,48 @@ Bağlantılar kişiye özel kriptografik kodlarla kurulur, uçtan uca şifrelidi
 
 ```bash
 # masaüstü uygulaması (önerilen)
-dist/Turkuaz-*.AppImage        # ya da masaüstündeki Turkuaz kısayolu
+dist/Turkuaz.AppImage          # ya da masaüstündeki Turkuaz kısayolu
 
 # geliştirme
 npm start                      # tarayıcıdan http://localhost:3210
 npm run app                    # electron penceresi
-npm run dist                   # AppImage üret
-npm test                       # 14 aşamalı uçtan uca test (3 sanal kullanıcı)
+npm run dist:linux             # Linux x64 AppImage üret
+npm run dist:win               # Windows x64 NSIS kurucusu üret (imza gerekir)
+npm test                       # updater sözleşmesi + 14 aşamalı P2P E2E
 npm run test:av                # ses/görüntü testi: 2 Electron, sahte kamera,
                                # kamera + ekran paylaşımı + DM araması + pano
+npm run test:voice:mesh        # 6 ayrı istemci, 15/15 ses bağlantısı
+TURKUAZ_VOICE_CLIENTS=10 npm run test:voice:mesh  # 10 istemci, 45/45
+npm run test:bare              # telefonla ortak Bare çekirdeği + offline dönüş
 ```
 
 Ortam değişkenleri: `PORT` (3210), `TURKUAZ_DATA` (veri klasörü),
 `TURKUAZ_BOOTSTRAP` (test için yerel DHT, örn `127.0.0.1:49737`),
-`TURKUAZ_ICE` (özel ICE sunucuları, aşağıya bak),
-`TURKUAZ_UPDATE_URL` (özel güncelleme feed'i, aşağıya bak).
+`TURKUAZ_ICE` (özel ICE sunucuları, aşağıya bak).
 
 ## İndir (Windows / Linux)
 
 Hazır paketler [Releases](https://github.com/demirataalbuz-maker/turkuaz-haberlesme/releases)
 sayfasında:
-- **Windows:** `Turkuaz-Setup-X.Y.Z.exe` — indir, çalıştır, kurulur.
-- **Linux:** `Turkuaz-X.Y.Z.AppImage` — indir, çalıştırılabilir yap (`chmod +x`), aç.
+- **Windows x64:** `Turkuaz-Setup-X.Y.Z.exe` — indir, çalıştır, kurulur.
+- **Linux x64:** `Turkuaz.AppImage` — indir, çalıştırılabilir yap (`chmod +x`), aç.
 
 Her iki paket de kendini otomatik günceller (aşağıya bak).
 
 ## Otomatik güncelleme
 
-Paketli uygulama (Windows `.exe` / Linux AppImage) kendini günceller: açılışta
-(15 sn sonra) ve 4 saatte bir GitHub Releases'e bakar, yeni sürüm varsa arka
-planda indirir (sha512 doğrulamalı), bildirim gösterir ve **uygulama kapanırken
-kurar**. Tepsi menüsünden "güncellemesini kur" ile hemen de kurulabilir.
-Linux'ta AppImage'ı sabit bir yola koy (örn `~/Uygulamalar/Turkuaz.AppImage`) —
-güncelleme dosyayı yerinde değiştirir, kısayolun hep geçerli kalır. (Windows
-kurulumu zaten sabit klasöre gelir.)
+NSIS ile kurulmuş Windows uygulaması ve Linux AppImage, açılıştan 15 saniye
+sonra ve ardından 4 saatte bir son **stable** GitHub Release'i denetler. Bu bir
+push bildirimi değildir; yeni sürüm bulununca arka planda iner, uygulama içindeki
+şerit yüzdeyi gösterir ve indirme bitince sistem bildirimi gelir. Ayarlar →
+Gelişmiş'ten elle denetleyebilir, şeritten/ayarlardan/tepsiden **Yeniden başlat ve
+güncelle** diyebilirsin.
+
+"Sonra" dersen güncelleme gerçek uygulama çıkışında kurulur. Pencerenin X'i
+Turkuaz'ı kapatmaz, tepsiye gizler; gerçek çıkış için tepsi → Çıkış'ı kullan.
+Linux'ta AppImage'ı yazılabilir bir klasöre koy (örn.
+`~/Uygulamalar/Turkuaz.AppImage`); hem dosya hem üst klasörü yazılabilir olmalı.
+Updater dosyayı yerinde değiştirir, dolayısıyla aynı kısayol geçerli kalır.
 
 Yeni sürüm yayınlamak (repo sahibi) — **Windows + Linux birlikte, GitHub Actions ile:**
 
@@ -77,19 +88,30 @@ npm version patch        # sürümü yükseltir (X.Y.Z) + git tag oluşturur (vX
 git push --follow-tags   # tag'i push'la → .github/workflows/release.yml tetiklenir
 ```
 
-Actions bulutta Windows'ta `.exe`, Linux'ta AppImage derler ve ikisini de
-GitHub Release'e (taslak) yükler. Actions bitince release'i **"Publish"** et —
-oto-update tüm kurulumlara (her iki platform) dağıtır. Ekstra token gerekmez,
-Actions'ın kendi `GITHUB_TOKEN`'ı yeter.
+Actions önce updater/P2P/Bare/Electron testlerini geçirir; Windows'ta imzalı
+`.exe`, Linux'ta AppImage üretir; manifest boyutu ve SHA-512 zincirini kontrol
+eder. Sonra tek taslak Release'e şu beş dosyayı birlikte koyar:
 
-Tek platform elle derlemek istersen: `GH_TOKEN=<token> npm run release`
-(çalıştığın OS'un hedefini derler), ya da yayınlamadan `npm run dist`.
+- `Turkuaz.AppImage` + `latest-linux.yml`
+- `Turkuaz-Setup-X.Y.Z.exe` + `.exe.blockmap` + `latest.yml`
 
-Kendi feed'ini kullanmak istersen `TURKUAZ_UPDATE_URL=https://ornek.com/feed`
-ver — o adreste `latest-linux.yml` + AppImage duran herhangi bir statik sunucu
-yeterli. Not: güncelleme kanalı = uzaktan kod çalıştırma yetkisi; güven zinciri
-GitHub hesabına dayanır, hesabında 2FA açık olsun. `npm start` (git) kurulumları
-kendini güncellemez — `git pull` yeterli.
+Taslak updater'a görünmez. Temiz Windows ve Linux makinelerinde eski sürümden
+aday sürüme kabul testi yaptıktan sonra **Publish release** seç; istemciler bir
+sonraki açılışta veya en geç sonraki 4 saatlik kontrolde görür. Yayınlanmış
+hatalı bir sürümün dosyalarını değiştirme; daha yüksek bir X.Y.Z yaması çıkar.
+
+Windows release işi `WIN_CSC_LINK` ve `WIN_CSC_KEY_PASSWORD` GitHub secret'ları
+olmadan bilerek durur; kurucu geçerli Authenticode imzası taşımak zorundadır ve
+sertifika yayıncı adı sonraki sürümlerde sabit kalmalıdır. GitHub release yükleme
+için Actions'ın kendi `GITHUB_TOKEN`'ı yeterlidir. Repo ve Releases public
+kalmalı; kullanıcı uygulamasına GitHub token gömülmez. GitHub hesabında 2FA'yı
+açık tut. Linux'ta Windows Authenticode eşdeğeri olmadığı için yayın zincirinin
+güveni GitHub hesabı ve Actions yetkilerine dayanır.
+
+Arka plandaki geçici ağ hataları banner açmaz; ayrıntı kullanıcı veri klasöründe
+`update.log` dosyasına yazılır (1 MiB'de `update.log.old` olur). `npm start` veya
+`npm run app` geliştirme sürümleri kendini güncellemez; git kurulumunda
+`git pull` kullanılır.
 
 ## Ses/görüntü bağlanmıyor mu?
 
@@ -126,7 +148,7 @@ cd turkuaz-haberlesme
 npm install
 npm start              # tarayıcıdan http://localhost:3210
 # masaüstü uygulaması istersen:
-npm run dist           # dist/Turkuaz-*.AppImage üretir
+npm run dist:linux     # dist/Turkuaz.AppImage üretir
 ```
 
 İki PC'de de açınca kodlaşıp arkadaş olun; hesabını taşımak istersen
@@ -143,5 +165,7 @@ uygulamadaki ⇄ (Hesabı taşı) butonunu kullan.
 ## Sınırlar (bilinçli)
 
 - Herkes offline'ken oda mesajı iletilmez (verecek biri online olmalı).
-- Sesli sohbet tam örgü: 2-8 kişilik gruplar için ideal.
+- Sesli sohbet tam örgü: ana kabul hedefi 5+1; aynı-makine laboratuvar testinde
+  10 kişi/45 bağlantı geçti. Farklı ev ağları, TURN ve uzun süreli soak kabulü
+  ayrıca yapılmalı.
 - Mobil ve kalabalık odalar (SFU) sonraki aşama.

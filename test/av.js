@@ -13,6 +13,7 @@ const WebSocket = require('ws')
 const ROOT = path.join(__dirname, '..')
 const TMP = path.join(__dirname, 'tmp-av')
 const BOOTSTRAP_PORT = parseInt(process.env.TEST_BOOTSTRAP_PORT || '49881', 10)
+const CAPTURE_DIR = process.env.TURKUAZ_UI_CAPTURE_DIR || ''
 
 fs.rmSync(TMP, { recursive: true, force: true })
 fs.mkdirSync(TMP, { recursive: true })
@@ -101,6 +102,12 @@ class Page {
       await sleep(500)
     }
     fail(`${this.label}: "${desc}" ${timeoutMs / 1000}s içinde olmadı`)
+  }
+  async screenshot (file) {
+    await this.cmd('Page.enable')
+    const r = await this.cmd('Page.captureScreenshot', { format: 'png', fromSurface: true })
+    if (!r.result || !r.result.data) throw new Error(this.label + ': ekran görüntüsü alınamadı')
+    fs.writeFileSync(file, Buffer.from(r.result.data, 'base64'))
   }
 }
 
@@ -223,11 +230,123 @@ async function main () {
   await pA.eval("TurkuazSettings.set('theme','dark'); TurkuazSettings.set('density','cozy'); TurkuazSettings.apply(); true")
   console.log('PASS: açık tema + mesaj yoğunluğu uygulanıyor')
 
+  console.log('--- 1e2) Menü sistemi: masaüstü hizası + mobil drawer/ayar/üye paneli')
+  const desktopMenu = await pA.eval(`(() => {
+    const side = document.getElementById('sidebar-head').getBoundingClientRect()
+    const chat = document.getElementById('chat-head').getBoundingClientRect()
+    const railRooms = getComputedStyle(document.getElementById('rail-rooms'))
+    return {
+      headerDelta: Math.abs(side.height - chat.height),
+      roomFlow: railRooms.display + ':' + railRooms.flexDirection,
+      topbar: getComputedStyle(document.documentElement).getPropertyValue('--topbar-h').trim()
+    }
+  })()`)
+  if (desktopMenu.headerDelta > 1 || desktopMenu.roomFlow !== 'flex:column' || !desktopMenu.topbar) {
+    fail('masaüstü menü hizası bozuk: ' + JSON.stringify(desktopMenu))
+  }
+  if (CAPTURE_DIR) {
+    fs.mkdirSync(CAPTURE_DIR, { recursive: true })
+    await pA.screenshot(path.join(CAPTURE_DIR, 'menu-desktop-room.png'))
+  }
+
+  await pA.cmd('Emulation.setDeviceMetricsOverride', { width: 900, height: 700, deviceScaleFactor: 1, mobile: false })
+  const compactDesktop = await pA.eval(`(() => {
+    window.dispatchEvent(new Event('resize'))
+    const head = document.getElementById('chat-head')
+    const actions = document.getElementById('chat-actions')
+    const toggle = actions.querySelector('.members-toggle')
+    return {
+      noOverflow: head.scrollWidth <= head.clientWidth + 1 && actions.getBoundingClientRect().right <= head.getBoundingClientRect().right + 1,
+      memberDrawerAction: !!toggle && getComputedStyle(toggle).display !== 'none'
+    }
+  })()`)
+  if (!compactDesktop.noOverflow || !compactDesktop.memberDrawerAction) fail('900px masaüstü başlığı taşıyor: ' + JSON.stringify(compactDesktop))
+
+  await pA.cmd('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false })
+  const mobileMenu = await pA.eval(`(async () => {
+    window.dispatchEvent(new Event('resize'))
+    await new Promise(r => setTimeout(r, 120))
+    closeDrawer()
+    const rail = document.getElementById('rail')
+    const drawerClosedInert = rail.inert && document.getElementById('sidebar').inert
+    document.getElementById('btn-menu').click()
+    const drawerOpen = document.body.classList.contains('drawer-open') && !rail.inert
+    document.getElementById('btn-add-room').focus()
+    document.getElementById('btn-add-room').click()
+    await new Promise(r => setTimeout(r, 30))
+    const roomModal = document.getElementById('modal-room')
+    const modalAboveDrawer = !document.body.classList.contains('drawer-open') &&
+      Number(getComputedStyle(roomModal).zIndex) > Number(getComputedStyle(rail).zIndex)
+    const modalFocus = document.activeElement.id === 'room-name-input'
+    hideModal('modal-room')
+    await new Promise(r => setTimeout(r, 30))
+    const modalFocusRestored = document.activeElement.id === 'btn-menu'
+
+    openRoom(state.rooms[0])
+    const mt = document.querySelector('.members-toggle')
+    mt.click()
+    const member = document.getElementById('member-list')
+    const membersAvailable = getComputedStyle(member).display !== 'none' && member.classList.contains('panel-open')
+    member.classList.remove('panel-open')
+    syncMemberPanel()
+
+    TurkuazSettings.open('appearance')
+    await new Promise(r => setTimeout(r, 80))
+    const nav = document.getElementById('set-nav')
+    const row = document.querySelector('#set-panel .set-row')
+    const navFlow = getComputedStyle(nav).flexDirection
+    const rowFlow = row && getComputedStyle(row).flexDirection
+    const settingsBox = document.getElementById('settings').getBoundingClientRect()
+    const content = document.getElementById('set-content')
+    const settingsResponsive = navFlow === 'row' && rowFlow === 'column' &&
+      settingsBox.width <= innerWidth + 1 && content.scrollWidth <= content.clientWidth + 1
+    showModal('modal-ring', 'btn-ring-accept')
+    await new Promise(r => setTimeout(r, 30))
+    const ringOverSettings = document.getElementById('settings').inert && document.activeElement.id === 'btn-ring-accept'
+    hideModal('modal-ring')
+    await new Promise(r => setTimeout(r, 30))
+    const settingsRecovered = !document.getElementById('settings').inert && document.getElementById('settings').contains(document.activeElement)
+    document.getElementById('set-close').click()
+    return { drawerClosedInert, drawerOpen, modalAboveDrawer, modalFocus, modalFocusRestored, membersAvailable, settingsResponsive, ringOverSettings, settingsRecovered, navFlow, rowFlow, contentWidth: content.scrollWidth + '/' + content.clientWidth, width: innerWidth }
+  })()`)
+  if (CAPTURE_DIR) {
+    await pA.eval("document.getElementById('btn-menu').click(); true")
+    await sleep(80)
+    await pA.screenshot(path.join(CAPTURE_DIR, 'menu-mobile-drawer.png'))
+    await pA.eval("closeDrawer(); TurkuazSettings.open('appearance'); true")
+    await sleep(100)
+    await pA.screenshot(path.join(CAPTURE_DIR, 'menu-mobile-settings.png'))
+    await pA.eval("document.getElementById('set-close').click(); true")
+  }
+  await pA.cmd('Emulation.clearDeviceMetricsOverride')
+  await pA.eval("window.dispatchEvent(new Event('resize')); true")
+  if (!mobileMenu.drawerClosedInert || !mobileMenu.drawerOpen || !mobileMenu.modalAboveDrawer || !mobileMenu.modalFocus ||
+      !mobileMenu.modalFocusRestored || !mobileMenu.membersAvailable || !mobileMenu.settingsResponsive ||
+      !mobileMenu.ringOverSettings || !mobileMenu.settingsRecovered || mobileMenu.width !== 390) {
+    fail('mobil menü sözleşmesi bozuk: ' + JSON.stringify(mobileMenu))
+  }
+  console.log('PASS: menü hizası, mobil drawer, modal katmanı, üye paneli ve ayarlar responsive')
+
   console.log('--- 1f) Ekran seçici köprüsü (preload/IPC)')
   if (!(await pA.eval("!!(window.turkuazDesktop && window.turkuazDesktop.getSources)"))) fail('preload köprüsü (turkuazDesktop) yok')
   const srcCount = await pA.eval("(async()=>{ try { const s = await window.turkuazDesktop.getSources(); return Array.isArray(s)?s.length:-1 } catch(e){ return 'hata:'+e.message } })()")
   console.log('    testte ekran kaynağı sayısı:', srcCount)
-  console.log('PASS: ekran seçici köprüsü (getSources) çalışıyor')
+  const updateStatus = await pA.eval("window.turkuazDesktop.updates.getState().then(s => s.status).catch(e => 'hata:' + e.message)")
+  if (updateStatus !== 'disabled') fail('geliştirme updater durumu beklenmedik: ' + updateStatus)
+  const picker = await pA.eval(`(async () => {
+    const thumb = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='
+    const result = pickScreen([{ id: 'screen:a', name: 'Ekran A', thumb }, { id: 'screen:b', name: 'Ekran B', thumb }])
+    await new Promise(r => setTimeout(r, 40))
+    const dialog = document.querySelector('.modal-back[aria-label="Paylaşılacak ekranı seç"]')
+    const semantic = !!dialog && dialog.getAttribute('role') === 'dialog' && dialog.querySelectorAll('button.screen-opt').length === 2
+    const focused = document.activeElement && document.activeElement.classList.contains('screen-opt')
+    dialog.querySelector('.cancel').click()
+    const value = await result
+    await new Promise(r => setTimeout(r, 20))
+    return { semantic, focused, cancelled: value === null, unlocked: !document.getElementById('app').inert }
+  })()`)
+  if (!picker.semantic || !picker.focused || !picker.cancelled || !picker.unlocked) fail('ekran seçici erişilebilirlik sözleşmesi bozuk: ' + JSON.stringify(picker))
+  console.log('PASS: ekran seçici + focus/ARIA + dar updater preload/IPC köprüleri çalışıyor')
 
   console.log('--- 2) Oda sesli sohbeti')
   // Teşhis kancası: rtc sinyal trafiğini ve konsol hatalarını topla
@@ -265,6 +384,39 @@ async function main () {
     fail('oda sesli sohbeti bağlanamadı')
   }
   console.log('PASS: oda sesli sohbeti bağlandı')
+
+  console.log('--- 2a) Kalıcı ses dock’u + bağlantı kalitesi + hızlı susturma')
+  const voiceDock = await pA.eval(`(async () => {
+    await Voice.sampleStats()
+    await new Promise(r => setTimeout(r, 180))
+    const dock = document.getElementById('voice-dock')
+    const roomStatus = document.getElementById('lr-connection')
+    const stageBox = document.getElementById('lr-stage').getBoundingClientRect()
+    const bubbleBounds = [...document.querySelectorAll('#lr-stage .lr-bubble')].every(el => {
+      const box = el.getBoundingClientRect()
+      return box.left >= stageBox.left - 1 && box.right <= stageBox.right + 1 && box.top >= stageBox.top - 1 && box.bottom <= stageBox.bottom + 1
+    })
+    const inRoom = !dock.classList.contains('hidden') && dock.dataset.quality === 'good' &&
+      roomStatus.textContent.includes('2 kişi')
+    openDM(state.friends[0])
+    const overDm = !dock.classList.contains('hidden') && document.getElementById('voice-dock-room').textContent === 'avtest'
+    document.getElementById('voice-dock-mute').click()
+    const muted = Voice.muted && document.getElementById('voice-dock-mute').getAttribute('aria-pressed') === 'true'
+    document.getElementById('voice-dock-mute').click()
+    document.getElementById('voice-dock-return').click()
+    return { inRoom, bubbleBounds, overDm, muted, unmuted: !Voice.muted, returned: activeConv.type === 'room' && activeConv.topic === Voice.room }
+  })()`)
+  if (!voiceDock.inRoom || !voiceDock.bubbleBounds || !voiceDock.overDm || !voiceDock.muted || !voiceDock.unmuted || !voiceDock.returned) {
+    fail('kalıcı ses dock sözleşmesi bozuk: ' + JSON.stringify(voiceDock))
+  }
+  if (CAPTURE_DIR) {
+    await pA.screenshot(path.join(CAPTURE_DIR, 'voice-room-connected.png'))
+    await pA.eval('openDM(state.friends[0]); true')
+    await sleep(120)
+    await pA.screenshot(path.join(CAPTURE_DIR, 'voice-dock-over-dm.png'))
+    await pA.eval("document.getElementById('voice-dock-return').click(); true")
+  }
+  console.log('PASS: ses dock’u DM üstünde kalıyor; kalite, sustur ve odaya dön çalışıyor')
 
   console.log('--- 2b) Ses gerçekten akıyor mu (giriş-kazancı işlenmiş mikrofon)')
   await sleep(2500)
@@ -352,12 +504,17 @@ async function main () {
   await pA.eval("document.dispatchEvent(new KeyboardEvent('keydown', {code:'KeyT'})); true")
   await sleep(120)
   if (!(await pA.eval("Voice.mic.getAudioTracks()[0].enabled === true"))) fail('PTT tuşuna basınca mikrofon açılmadı')
+  await pA.eval("window.dispatchEvent(new Event('blur')); true")
+  await sleep(120)
+  if (!(await pA.eval("Voice.mic.getAudioTracks()[0].enabled === false"))) fail('PTT sırasında odak gidince mikrofon güvenli kapanmadı')
+  await pA.eval("document.dispatchEvent(new KeyboardEvent('keydown', {code:'KeyT'})); true")
+  await sleep(120)
   await pA.eval("document.dispatchEvent(new KeyboardEvent('keyup', {code:'KeyT'})); true")
   await sleep(120)
   if (!(await pA.eval("Voice.mic.getAudioTracks()[0].enabled === false"))) fail('PTT tuşu bırakınca mikrofon kapanmadı')
   await pA.eval("TurkuazSettings.set('speakMode','open'); Voice._startGate(); true")
   if (!(await pA.eval("Voice.mic.getAudioTracks()[0].enabled === true"))) fail('Açık moda dönünce mikrofon açılmadı')
-  console.log('PASS: bas-konuş (PTT) kapısı çalışıyor (kapalı → bas aç → bırak kapan → açık)')
+  console.log('PASS: bas-konuş (PTT) kapısı çalışıyor (kapalı → bas aç → odak kaybında güvenli kapan → açık)')
 
   console.log('--- 4d) Oyun modu: hava hokeyi (davet → katıl → fizik yayını → girdi → kapat)')
   // teşhis kancaları: A'ya gelen oyun olayları + B'nin gönderdikleri

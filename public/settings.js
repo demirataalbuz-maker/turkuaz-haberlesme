@@ -21,6 +21,36 @@
     set (k, v) { settings[k] = v; persist() }
   }
 
+  function setMediaSink (el, id) {
+    if (!el || typeof el.setSinkId !== 'function') return Promise.resolve(false)
+    try { return Promise.resolve(el.setSinkId(id || '')).then(() => true).catch(() => false) } catch { return Promise.resolve(false) }
+  }
+
+  function setModuleSink (mod, id) {
+    if (!mod || typeof mod.setSink !== 'function') return Promise.resolve(false)
+    try { return Promise.resolve(mod.setSink(id || '')).then(() => true).catch(() => false) } catch { return Promise.resolve(false) }
+  }
+
+  // Tek çıkış yönlendiricisi: oda/DM sesi, soundboard ve ekran paylaşımı
+  // oynatıcıları aynı kayıtlı hoparlörü kullanır. Desteklemeyen tarayıcılarda
+  // güvenli biçimde sistem varsayılanına düşer.
+  function applyOutputSink (id, save) {
+    id = String(id || '')
+    if (save) window.TurkuazSettings.set('spkId', id)
+    return Promise.all([
+      setModuleSink(window.Voice, id),
+      setModuleSink(window.CallMgr, id),
+      setModuleSink(window.Soundboard, id),
+      setMediaSink($('call-remote'), id),
+      setMediaSink($('theater-video'), id)
+    ])
+  }
+
+  window.TurkuazAudioOutput = {
+    set (id) { return applyOutputSink(id, true) },
+    apply () { return applyOutputSink(settings.spkId, false) }
+  }
+
   const $ = (id) => document.getElementById(id)
   const CATS = [
     { id: 'av', label: 'Ses ve Görüntü', icon: '🎧' },
@@ -33,32 +63,69 @@
   let testStream = null
   let testRaf = null
   let labelsUnlocked = false
+  let returnFocus = null
 
   function open (cat) {
+    returnFocus = document.activeElement
+    if (typeof closeDrawer === 'function') closeDrawer()
     cur = cat || 'av'
     renderNav()
     renderPanel()
     $('settings').classList.remove('hidden')
+    $('settings').setAttribute('aria-hidden', 'false')
+    if (typeof syncDialogInert === 'function') syncDialogInert()
+    setTimeout(() => $('set-close').focus(), 0)
   }
-  function close () {
+  function close (restoreFocus = true) {
     stopMicTest()
     $('settings').classList.add('hidden')
+    $('settings').setAttribute('aria-hidden', 'true')
+    if (typeof syncDialogInert === 'function') syncDialogInert()
+    if (restoreFocus) {
+      setTimeout(() => {
+        let target = returnFocus
+        if (!target || !target.isConnected || target.disabled || target.closest('[inert]')) target = $('btn-menu')
+        if (target && target.focus) target.focus()
+      }, 0)
+    }
   }
 
   function renderNav () {
     const nav = $('set-nav')
     nav.innerHTML = ''
     for (const c of CATS) {
-      const el = document.createElement('div')
+      const el = document.createElement('button')
+      el.type = 'button'
       el.className = 'set-cat' + (c.id === cur ? ' active' : '')
+      el.id = 'set-tab-' + c.id
+      el.setAttribute('role', 'tab')
+      el.setAttribute('aria-selected', c.id === cur ? 'true' : 'false')
+      el.setAttribute('aria-controls', 'set-panel')
+      el.tabIndex = c.id === cur ? 0 : -1
       el.innerHTML = `<span class="ic">${c.icon}</span><span>${c.label}</span>`
-      el.onclick = () => { if (cur !== c.id) { stopMicTest(); cur = c.id; renderNav(); renderPanel() } }
+      el.onclick = () => selectCategory(c.id, true)
+      el.onkeydown = (e) => {
+        const i = CATS.findIndex(x => x.id === c.id)
+        let next = -1
+        if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (i + 1) % CATS.length
+        else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (i - 1 + CATS.length) % CATS.length
+        else if (e.key === 'Home') next = 0
+        else if (e.key === 'End') next = CATS.length - 1
+        if (next >= 0) { e.preventDefault(); selectCategory(CATS[next].id, true) }
+      }
       nav.appendChild(el)
     }
   }
 
+  function selectCategory (id, focusTab) {
+    if (cur !== id) { stopMicTest(); cur = id; renderNav(); renderPanel() }
+    if (focusTab) setTimeout(() => $('set-tab-' + id)?.focus(), 0)
+  }
+
   function renderPanel () {
     const p = $('set-panel')
+    p.setAttribute('role', 'tabpanel')
+    p.setAttribute('aria-labelledby', 'set-tab-' + cur)
     if (cur === 'av') return renderAV(p)
     if (cur === 'account') return renderAccount(p)
     if (cur === 'appearance') return renderAppearance(p)
@@ -133,7 +200,7 @@
       selectEl(opt(mics, 'Mikrofon'), settings.micId, v => { TurkuazSettings.set('micId', v) }),
       'Değişiklik bir sonraki katılım/aramada geçerli.'))
     gDev.appendChild(row('Çıkış cihazı (hoparlör)',
-      selectEl(opt(spks, 'Hoparlör'), settings.spkId, v => { TurkuazSettings.set('spkId', v); Voice.setSink && Voice.setSink(v); CallMgr.setSink && CallMgr.setSink(v) })))
+      selectEl(opt(spks, 'Hoparlör'), settings.spkId, v => { window.TurkuazAudioOutput.set(v) })))
     p.appendChild(gDev)
 
     // Gürültü engelleme (AI)
@@ -273,7 +340,11 @@
       <div class="set-acc-name">${esc(state.me.name || 'isimsiz')}</div>
       <div class="set-acc-status">${esc(state.me.status || 'çevrimiçi')}</div>`
     const editBtn = document.createElement('button'); editBtn.className = 'set-btn primary'; editBtn.textContent = 'Profili düzenle'
-    editBtn.onclick = () => { close(); openProfile() }
+    editBtn.onclick = () => {
+      close(false)
+      ;(window.innerWidth < 761 ? $('btn-menu') : $('btn-settings')).focus()
+      openProfile()
+    }
     info.appendChild(editBtn)
     g.appendChild(info)
     p.appendChild(g)
@@ -333,8 +404,23 @@
     const vnote = document.createElement('div'); vnote.className = 'set-note-box'
     vnote.innerHTML = window.TurkuazNative
       ? 'Yeni sürüm çıkınca uygulama açılışta üstte bildirir. En güncel APK: GitHub Releases.'
-      : 'Güncellemeler otomatik iner; uygulamayı kapatıp açınca kurulur (tepsi menüsünden de kurabilirsin).'
+      : 'Yeni sürüm arka planda indirilir. Hazır olunca bildirimden veya aşağıdaki düğmeden yeniden başlatıp kurabilirsin.'
     gv.appendChild(vnote)
+
+    if (window.turkuazDesktop && window.turkuazDesktop.updates) {
+      const urow = document.createElement('div'); urow.className = 'set-coderow'
+      const ust = document.createElement('span'); ust.id = 'set-update-status'; ust.className = 'set-code'
+      ust.textContent = 'Güncelleme durumu yükleniyor…'
+      const check = document.createElement('button'); check.id = 'set-update-check'; check.className = 'set-btn'
+      check.textContent = 'Güncellemeleri denetle'
+      check.onclick = () => window.TurkuazUpdates && window.TurkuazUpdates.check().catch(() => {})
+      const install = document.createElement('button'); install.id = 'set-update-install'; install.className = 'set-btn primary'
+      install.textContent = 'Yeniden başlat ve güncelle'; install.hidden = true
+      install.onclick = () => window.TurkuazUpdates && window.TurkuazUpdates.install().catch(() => {})
+      urow.append(ust, check, install)
+      gv.appendChild(urow)
+      setTimeout(() => { if (window.TurkuazUpdates) window.TurkuazUpdates.sync() }, 0)
+    }
     p.appendChild(gv)
 
     const g = group('UYGULAMA')
@@ -386,8 +472,18 @@
     if (gear) gear.onclick = () => open('av')
     const closeBtn = $('set-close')
     if (closeBtn) closeBtn.onclick = close
+    window.TurkuazAudioOutput.apply()
   })
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('settings').classList.contains('hidden')) { e.stopPropagation(); close() }
+    if ($('settings').classList.contains('hidden') || $('settings').inert) return
+    if (e.key === 'Escape') { e.stopPropagation(); close(); return }
+    if (e.key !== 'Tab') return
+    const focusable = [...$('settings').querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+      .filter(el => !el.hidden && !el.closest('.hidden') && el.tabIndex >= 0 && el.getClientRects().length > 0)
+    if (!focusable.length) { e.preventDefault(); return }
+    const first = focusable[0]; const last = focusable[focusable.length - 1]
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    else if (!$('settings').contains(document.activeElement)) { e.preventDefault(); first.focus() }
   }, true)
 })()

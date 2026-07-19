@@ -5,7 +5,12 @@ let activeConv = null            // { type:'dm', code } | { type:'room', topic }
 let replyTarget = null           // yanıtlanan mesaj { id, name, text }
 const activeChs = {}             // topic -> kanal adı
 const histories = {}             // conv -> [msg] (katlanmış)
-const unread = {}                // key -> sayı (dm: conv, oda: conv#ch)
+const unread = (() => {          // key -> sayı (dm: conv, oda: conv#ch)
+  try {
+    const value = JSON.parse(localStorage.getItem('turkuaz.unread') || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch { return {} }
+})()
 const typing = {}                // key -> { name, until }
 
 const $ = (id) => document.getElementById(id)
@@ -54,6 +59,64 @@ Transport.onMessage((m) => {
 })
 // send() ve Transport transport.js'te tanımlı (window.send / window.Transport).
 
+let transportStatus = 'connecting'
+function toast (message, kind = 'info', timeout = 3200) {
+  const region = $('toast-region')
+  if (!region || !message) return
+  const item = document.createElement('div')
+  item.className = 'toast ' + kind
+  item.textContent = String(message)
+  region.appendChild(item)
+  requestAnimationFrame(() => item.classList.add('show'))
+  setTimeout(() => {
+    item.classList.remove('show')
+    setTimeout(() => item.remove(), 180)
+  }, timeout)
+}
+window.toast = toast
+
+Transport.onStatus(({ status }) => {
+  const previous = transportStatus
+  transportStatus = status
+  const online = status === 'online'
+  const banner = $('connection-banner')
+  if (banner) {
+    banner.classList.toggle('hidden', online)
+    banner.dataset.status = status
+    $('connection-banner-text').textContent = status === 'connecting'
+      ? 'Turkuaz başlatılıyor…'
+      : status === 'reconnecting'
+        ? 'Bağlantı yeniden kuruluyor — mesajların kısa süreliğine sırada tutuluyor.'
+        : 'Bağlantı koptu — yeniden bağlanılıyor, mesajların sırada tutuluyor.'
+  }
+  const badge = document.querySelector('.p2p-badge')
+  if (badge) {
+    badge.dataset.status = status
+    badge.title = online ? 'Yerel Turkuaz motoru bağlı' : 'Turkuaz motoruna yeniden bağlanılıyor'
+  }
+  if (online && (previous === 'offline' || previous === 'reconnecting')) toast('Bağlantı yeniden kuruldu.', 'success')
+})
+
+function persistUnread () {
+  try { localStorage.setItem('turkuaz.unread', JSON.stringify(unread)) } catch {}
+}
+function syncUnreadUI () {
+  const total = Object.values(unread).reduce((sum, value) => sum + (Number(value) || 0), 0)
+  document.title = total ? `(${total}) Turkuaz` : 'Turkuaz'
+}
+function markRead (key) {
+  if (unread[key]) delete unread[key]
+  persistUnread()
+  syncUnreadUI()
+}
+function markActiveRead () {
+  if (!activeConv || document.visibilityState !== 'visible' || !document.hasFocus()) return
+  const key = activeConv.type === 'dm'
+    ? 'dm-' + activeConv.code
+    : 'room-' + activeConv.topic + '#' + activeCh(activeConv.topic)
+  if (unread[key]) { markRead(key); render() }
+}
+
 function convId () {
   if (!activeConv) return null
   return activeConv.type === 'dm' ? 'dm-' + activeConv.code : 'room-' + activeConv.topic
@@ -94,12 +157,14 @@ function onIncomingMsg (m) {
   histories[m.conv].push(m.msg)
   const mine = m.msg.from === state.me.code
   if (!mine && mentionsMe(m.msg.text)) pingSound()
-  const visible = isActiveConv(m.conv) &&
+  const visible = document.visibilityState === 'visible' && document.hasFocus() && isActiveConv(m.conv) &&
     (!m.conv.startsWith('room-') || (m.msg.ch || 'genel') === activeCh(m.conv.slice(5)))
   if (visible) renderMessages()
   else if (!mine) {
     const k = unreadKey(m.conv, m.msg.ch)
     unread[k] = (unread[k] || 0) + 1
+    persistUnread()
+    syncUnreadUI()
     render()
   }
 }
@@ -165,7 +230,8 @@ function onNotify (m) {
 }
 
 // ---- görsel yardımcılar ----
-const COLORS = ['#14b8a6', '#0ea5e9', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#22c55e', '#eab308']
+// Beyaz baş harfin her renkte okunabilmesi için paletin tamamı WCAG-kontrastlı koyu tonlarda.
+const COLORS = ['#0f766e', '#0369a1', '#6d28d9', '#b45309', '#b91c1c', '#be185d', '#15803d', '#a16207']
 function colorOf (code) {
   let h = 0
   for (const c of String(code)) h = (h * 31 + c.charCodeAt(0)) >>> 0
@@ -217,6 +283,7 @@ function avatarOf (code) {
 
 // ---- render ----
 function render () {
+  syncUnreadUI()
   const vb = $('ver-badge')
   if (vb) { const v = state.version || window.__TQ_MOBILE_VER; vb.textContent = v ? 'v' + v : '' }
   $('me-name').textContent = state.me.name || 'isimsiz'
@@ -227,6 +294,10 @@ function render () {
   av.className = state.me.avatar ? 'avatar emoji' : 'avatar'
   av.style.background = state.me.avatar ? '' : colorOf(state.me.code)
   if (!state.me.name && $('modal-profile').classList.contains('hidden')) openProfile()
+  const homeButton = $('btn-home')
+  const onHome = !activeConv
+  homeButton.classList.toggle('active', onHome)
+  homeButton.setAttribute('aria-current', onHome ? 'page' : 'false')
 
   // sol ray — odalar
   const rail = $('rail-rooms')
@@ -235,12 +306,17 @@ function render () {
     const activeR = activeConv && activeConv.type === 'room' && activeConv.topic === r.topic
     const el = document.createElement('div')
     el.className = 'rail-btn room' + (activeR ? ' active' : '')
-    if (!activeR) el.style.background = colorOf(r.topic)
+    if (!activeR) el.style.setProperty('--room-color', colorOf(r.topic))
     el.textContent = r.name.trim()[0].toUpperCase()
     el.title = `${r.name} — ${r.online} kişi çevrimiçi`
+    el.setAttribute('role', 'button')
+    el.setAttribute('tabindex', '0')
+    el.setAttribute('aria-label', el.title)
+    el.setAttribute('aria-current', activeR ? 'page' : 'false')
     const un = r.channels.reduce((s, ch) => s + (unread['room-' + r.topic + '#' + ch] || 0), 0)
     if (un) el.innerHTML += `<span class="badge">${un}</span>`
     el.onclick = () => openRoom(r)
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } }
     rail.appendChild(el)
   }
 
@@ -254,8 +330,10 @@ function render () {
     el.innerHTML = `${avatarHTML(r.avatar, r.name, r.code)}
       <div class="rname">${esc(r.name || 'anon')}<br><small>${shortCode(r.code)}</small></div>`
     const ok = document.createElement('button'); ok.className = 'ok'; ok.textContent = '✓'
+    ok.title = 'Arkadaşlık isteğini kabul et'; ok.setAttribute('aria-label', ok.title)
     ok.onclick = () => send({ t: 'accept-request', code: r.code })
     const no = document.createElement('button'); no.className = 'no'; no.textContent = '✕'
+    no.title = 'Arkadaşlık isteğini reddet'; no.setAttribute('aria-label', no.title)
     no.onclick = () => send({ t: 'reject-request', code: r.code })
     el.append(ok, no)
     rq.appendChild(el)
@@ -267,6 +345,10 @@ function render () {
   for (const f of state.friends) {
     const el = document.createElement('div')
     el.className = 'dm-item' + (activeConv && activeConv.type === 'dm' && activeConv.code === f.code ? ' active' : '')
+    el.setAttribute('role', 'button')
+    el.setAttribute('tabindex', '0')
+    el.setAttribute('aria-label', nameOf(f) + (f.online ? ', çevrimiçi' : ', çevrimdışı'))
+    el.setAttribute('aria-current', activeConv && activeConv.type === 'dm' && activeConv.code === f.code ? 'page' : 'false')
     const un = unread['dm-' + f.code]
     el.innerHTML = `${avatarHTML(f.avatar, f.name, f.code, f.online)}
       <div class="dcol">
@@ -276,10 +358,11 @@ function render () {
       ${f.status === 'pending-out' ? '<span class="pstat wait" title="Karşı tarafın seni eklemesi bekleniyor">⏳</span>' : ''}
       ${un ? `<span class="unread">${un}</span>` : ''}`
     el.onclick = () => openDM(f)
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } }
     dl.appendChild(el)
   }
   if (!state.friends.length) {
-    dl.innerHTML = '<div style="color:var(--tx3);font-size:12px;padding:4px 10px">Henüz arkadaş yok. Kodunu paylaş ya da arkadaşının kodunu ekle.</div>'
+    dl.innerHTML = '<div class="dm-empty"><span>👋</span><b>Henüz arkadaş yok</b><small>Kodunu paylaş veya yukarıdan bir arkadaş ekle.</small></div>'
   }
 
   renderChatHead()
@@ -292,14 +375,27 @@ function render () {
 function renderMembers () {
   const panel = $('member-list')
   if (!panel) return
-  if (!activeConv || activeConv.type !== 'room') { panel.classList.add('hidden'); return }
+  if (!activeConv || activeConv.type !== 'room') { panel.classList.add('hidden'); panel.classList.remove('panel-open'); syncMemberPanel(); return }
   const r = state.rooms.find(x => x.topic === activeConv.topic)
-  if (!r) { panel.classList.add('hidden'); return }
+  if (!r) { panel.classList.add('hidden'); panel.classList.remove('panel-open'); syncMemberPanel(); return }
   panel.classList.remove('hidden')
   const members = [{ code: state.me.code, name: state.me.name || 'sen', me: true }]
     .concat((r.members || []).filter(m => m.code !== state.me.code))
   panel.innerHTML = `<div class="ml-title">ÜYELER — ${members.length}</div>` + members.map(m =>
     `<div class="ml-item">${avatarHTML(avatarOf(m.code), m.name, m.code, true)}<span class="ml-name">${esc(m.name)}${m.me ? ' (sen)' : ''}</span></div>`).join('')
+  syncMemberPanel()
+}
+
+function syncMemberPanel () {
+  const panel = $('member-list')
+  if (!panel) return
+  const available = !panel.classList.contains('hidden')
+  const compact = window.innerWidth <= 1120
+  const exposed = available && (!compact || panel.classList.contains('panel-open'))
+  panel.inert = !exposed
+  panel.setAttribute('aria-hidden', exposed ? 'false' : 'true')
+  const toggle = document.querySelector('.members-toggle')
+  if (toggle) toggle.setAttribute('aria-expanded', exposed && compact ? 'true' : 'false')
 }
 
 function renderChatHead () {
@@ -321,14 +417,20 @@ function renderChatHead () {
       ? 'çevrimiçi — direkt P2P bağlantı' + (f.statusText ? ' · ' + f.statusText : '')
       : (f.status === 'pending-out' ? 'istek bekliyor — karşı tarafın da seni eklemesi lazım' : 'çevrimdışı — mesajlar bağlanınca iletilir')
     const call = document.createElement('button')
+    call.className = 'action-call'
     call.textContent = '📞 Ara'
+    call.title = 'Sesli veya görüntülü ara'
+    call.setAttribute('aria-label', call.title)
     call.disabled = !f.online
     if (!f.online) call.style.opacity = .4
     call.onclick = () => window.CallMgr && CallMgr.start(f.code)
     actions.appendChild(call)
     const blk = document.createElement('button')
     const isB = (state.blocked || []).includes(f.code)
+    blk.className = 'action-block' + (isB ? ' unblock' : '')
     blk.textContent = isB ? 'Engeli kaldır' : '🚫 Engelle'
+    blk.title = blk.textContent
+    blk.setAttribute('aria-label', blk.textContent)
     blk.onclick = () => {
       if (isB) send({ t: 'unblock', code: f.code })
       else if (confirm(nameOf(f) + ' engellensin mi? Mesajları artık gelmeyecek.')) send({ t: 'block', code: f.code })
@@ -339,18 +441,34 @@ function renderChatHead () {
     if (!r) { activeConv = null; return renderChatHead() }
     title.textContent = '⌂ ' + r.name
     sub.textContent = r.online + ' kişi çevrimiçi' + (r.isOwner ? ' · odanın sahibisin' : '')
+    const members = document.createElement('button')
+    members.className = 'members-toggle'
+    members.textContent = '👥 Üyeler'
+    members.title = 'Oda üyelerini göster'
+    members.setAttribute('aria-label', members.title)
+    members.setAttribute('aria-expanded', $('member-list').classList.contains('panel-open') ? 'true' : 'false')
+    members.onclick = () => {
+      $('member-list').classList.toggle('panel-open')
+      syncMemberPanel()
+    }
     const copy = document.createElement('button')
+    copy.className = 'action-copy'
     copy.textContent = 'Davet kodunu kopyala'
+    copy.title = 'Davet kodunu kopyala'
+    copy.setAttribute('aria-label', copy.title)
     copy.onclick = () => copyText(r.invite, copy, 'Kopyalandı ✓', 'Davet kodunu kopyala')
     const leave = document.createElement('button')
+    leave.className = 'action-leave'
     leave.textContent = 'Ayrıl'
+    leave.title = 'Odadan ayrıl'
+    leave.setAttribute('aria-label', leave.title)
     leave.onclick = () => {
       if (confirm('"' + r.name + '" odasından ayrılıyor musun?')) {
         send({ t: 'leave-room', topic: r.topic })
         activeConv = null; renderMessages(); render()
       }
     }
-    actions.append(copy, leave)
+    actions.append(members, copy, leave)
   }
 }
 
@@ -364,18 +482,25 @@ function renderTabs () {
   for (const ch of r.channels) {
     const el = document.createElement('div')
     el.className = 'ch-tab' + (activeCh(r.topic) === ch ? ' active' : '')
+    el.setAttribute('role', 'button')
+    el.setAttribute('tabindex', '0')
+    el.setAttribute('aria-current', activeCh(r.topic) === ch ? 'page' : 'false')
     const un = unread['room-' + r.topic + '#' + ch]
     el.innerHTML = `# ${esc(ch)}${un ? `<span class="unread">${un}</span>` : ''}`
     el.onclick = () => {
       activeChs[r.topic] = ch
-      delete unread['room-' + r.topic + '#' + ch]
+      markRead('room-' + r.topic + '#' + ch)
       render(); renderMessages()
     }
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } }
     bar.appendChild(el)
   }
   const add = document.createElement('div')
   add.className = 'ch-add'
   add.textContent = '+ kanal'
+  add.setAttribute('role', 'button')
+  add.setAttribute('tabindex', '0')
+  add.setAttribute('aria-label', 'Yeni kanal ekle')
   add.onclick = () => {
     const ch = prompt('Kanal adı:')
     if (ch && ch.trim()) {
@@ -383,6 +508,7 @@ function renderTabs () {
       activeChs[r.topic] = ch.trim().toLowerCase().replace(/[^a-z0-9ğüşöçı_-]/g, '')
     }
   }
+  add.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); add.click() } }
   bar.appendChild(add)
 }
 
@@ -392,7 +518,25 @@ function renderMessages () {
   renderTyping()
   const conv = convId()
   if (!conv) {
-    box.innerHTML = `<div class="empty-hint">🌊 Burada bulut yok.<br>Mesajların kendi diskinde, bağlantıların doğrudan arkadaşlarına.<br>Soldan bir sohbet seç ya da yeni arkadaş ekle.</div>`
+    box.innerHTML = `<div class="empty-state">
+      <div class="empty-wave" aria-hidden="true">≈</div>
+      <span class="empty-kicker">SUNUCUSUZ · DOĞRUDAN · SANA AİT</span>
+      <h1>Kendi akışına hoş geldin.</h1>
+      <p>Mesajların kendi diskinde kalır. Bağlantılar arkadaşlarına doğrudan ve şifreli gider.</p>
+      <div class="empty-actions">
+        <button id="empty-add-friend" class="empty-primary">Arkadaş ekle</button>
+        <button id="empty-create-room">Oda kur veya katıl</button>
+      </div>
+      <div class="empty-trust"><span>◆ Uçtan uca şifreli</span><span>◆ Merkezi sunucu yok</span><span>◆ Verin sende</span></div>
+    </div>`
+    $('empty-add-friend').onclick = () => {
+      if (window.innerWidth <= 760) {
+        document.body.classList.add('drawer-open')
+        syncDrawerButton()
+      }
+      setTimeout(() => $('friend-code-input').focus(), 0)
+    }
+    $('empty-create-room').onclick = () => $('btn-add-room').click()
     return
   }
   let msgs = histories[conv] || []
@@ -568,7 +712,7 @@ function openDM (f) {
   closeDrawer()
   activeConv = { type: 'dm', code: f.code }
   location.hash = 'dm-' + f.code
-  delete unread['dm-' + f.code]
+  markRead('dm-' + f.code)
   send({ t: 'history', conv: 'dm-' + f.code })
   render(); renderMessages()
   $('msg-input').focus()
@@ -579,7 +723,7 @@ function openRoom (r) {
   closeDrawer()
   activeConv = { type: 'room', topic: r.topic }
   location.hash = 'room-' + r.topic
-  delete unread['room-' + r.topic + '#' + activeCh(r.topic)]
+  markRead('room-' + r.topic + '#' + activeCh(r.topic))
   send({ t: 'history', conv: 'room-' + r.topic })
   render(); renderMessages()
   $('msg-input').focus()
@@ -603,8 +747,73 @@ function applyHash () {
   openConvById(h)
 }
 
-function showModal (id) { $(id).classList.remove('hidden') }
-function hideModal (id) { $(id).classList.add('hidden') }
+const modalReturnFocus = new Map()
+function syncDialogInert () {
+  const modalOpen = !!topVisibleModal()
+  const settingsOpen = $('settings') && !$('settings').classList.contains('hidden')
+  $('app').inert = modalOpen || settingsOpen
+  if ($('settings')) $('settings').inert = modalOpen
+  if ($('call-widget')) $('call-widget').inert = modalOpen || settingsOpen
+}
+window.syncDialogInert = syncDialogInert
+
+function topVisibleModal () {
+  return [...document.querySelectorAll('.modal-back[aria-modal="true"]')]
+    .filter(el => !el.classList.contains('hidden') && el.isConnected)
+    .sort((a, b) => Number(getComputedStyle(a).zIndex) - Number(getComputedStyle(b).zIndex))
+    .pop() || null
+}
+
+function modalFocusables (root) {
+  return [...root.querySelectorAll('button:not([disabled]):not([hidden]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.closest('.hidden') && !el.hidden && el.tabIndex >= 0 && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')
+}
+
+function showModal (id, preferredFocus) {
+  const root = $(id)
+  const opening = root.classList.contains('hidden')
+  if (opening) modalReturnFocus.set(id, document.activeElement)
+  closeDrawer()
+  root.classList.remove('hidden')
+  root.setAttribute('aria-hidden', 'false')
+  syncDialogInert()
+  if (opening) {
+    setTimeout(() => {
+      if (root.classList.contains('hidden')) return
+      const preferred = preferredFocus && $(preferredFocus)
+      const target = (preferred && !preferred.hidden && !preferred.disabled && preferred) || modalFocusables(root)[0]
+      if (target) target.focus()
+    }, 0)
+  }
+}
+
+function hideModal (id, restoreFocus = true) {
+  const root = $(id)
+  if (!root || root.classList.contains('hidden')) return
+  root.classList.add('hidden')
+  root.setAttribute('aria-hidden', 'true')
+  syncDialogInert()
+  const previous = modalReturnFocus.get(id)
+  modalReturnFocus.delete(id)
+  if (!restoreFocus) return
+  setTimeout(() => {
+    let target = previous
+    if (!target || !target.isConnected || target.disabled || target.closest('[inert]')) target = $('btn-menu')
+    if (target && target.focus) target.focus()
+  }, 0)
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return
+  const visible = topVisibleModal()
+  if (!visible) return
+  const focusable = modalFocusables(visible)
+  if (!focusable.length) { e.preventDefault(); return }
+  const first = focusable[0]; const last = focusable[focusable.length - 1]
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+  else if (!visible.contains(document.activeElement)) { e.preventDefault(); first.focus() }
+}, true)
 
 // ---- profil ----
 let selAvatar = ''
@@ -612,28 +821,35 @@ function openProfile () {
   $('profile-name').value = state.me.name
   $('profile-status').value = state.me.status || ''
   selAvatar = state.me.avatar || ''
+  $('btn-close-profile').hidden = !state.me.name
   const grid = $('avatar-grid')
   grid.innerHTML = ''
-  const none = document.createElement('div')
+  const none = document.createElement('button')
+  none.type = 'button'
   none.className = 'av-opt' + (selAvatar === '' ? ' sel' : '')
   none.textContent = 'Aa'
   none.style.fontSize = '14px'
   none.title = 'Baş harfini kullan'
-  none.onclick = () => { selAvatar = ''; openProfile() }
+  none.setAttribute('aria-pressed', selAvatar === '' ? 'true' : 'false')
+  none.onclick = () => { selAvatar = ''; openProfile(); setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0) }
   grid.appendChild(none)
   for (const a of AVATARS) {
-    const el = document.createElement('div')
+    const el = document.createElement('button')
+    el.type = 'button'
     el.className = 'av-opt' + (selAvatar === a ? ' sel' : '')
     el.textContent = a
-    el.onclick = () => { selAvatar = a; openProfile() }
+    el.setAttribute('aria-label', a + ' avatarını seç')
+    el.setAttribute('aria-pressed', selAvatar === a ? 'true' : 'false')
+    el.onclick = () => { selAvatar = a; openProfile(); setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0) }
     grid.appendChild(el)
   }
-  showModal('modal-profile')
+  showModal('modal-profile', 'profile-name')
 }
 
 // Panoya yaz; API reddederse (izin/odak) gizli textarea yöntemine düş.
 // Butona gerçek sonucu yansıt — başarısızken "Kopyalandı" deme.
 async function copyText (text, btn, ok, back) {
+  const restoreHTML = btn.classList.contains('icon-button') ? btn.innerHTML : null
   let done = true
   try {
     await navigator.clipboard.writeText(text)
@@ -648,7 +864,10 @@ async function copyText (text, btn, ok, back) {
     ta.remove()
   }
   btn.textContent = done ? ok : 'Kopyalanamadı!'
-  setTimeout(() => { btn.textContent = back }, 1500)
+  setTimeout(() => {
+    if (restoreHTML !== null) btn.innerHTML = restoreHTML
+    else btn.textContent = back
+  }, 1500)
 }
 
 // ---- olaylar ----
@@ -660,6 +879,7 @@ $('btn-add-friend').onclick = () => {
 $('friend-code-input').onkeydown = (e) => { if (e.key === 'Enter') $('btn-add-friend').onclick() }
 
 $('btn-edit-profile').onclick = openProfile
+$('btn-close-profile').onclick = () => { if (state.me.name) hideModal('modal-profile') }
 $('btn-save-profile').onclick = () => {
   const name = $('profile-name').value.trim()
   if (!name) return
@@ -671,15 +891,17 @@ $('profile-name').onkeydown = (e) => { if (e.key === 'Enter') $('btn-save-profil
 function renderGroupFriends () {
   const box = $('group-friends'); box.innerHTML = ''
   const fr = state.friends.filter(f => f.status === 'friend')
-  if (!fr.length) { box.innerHTML = '<div style="color:var(--tx3);font-size:12px;padding:4px 2px">Önce arkadaş ekle.</div>'; return }
+  if (!fr.length) { box.innerHTML = '<div class="group-empty"><span>👥</span><b>Gruba eklenebilecek arkadaş yok</b><small>Önce sol menüden bir arkadaş ekle.</small></div>'; return }
   for (const f of fr) {
     const lab = document.createElement('label'); lab.className = 'group-friend'
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = f.code
-    lab.append(cb, document.createTextNode(' ' + nameOf(f)))
+    const name = document.createElement('span'); name.textContent = nameOf(f)
+    lab.append(cb, name)
     box.appendChild(lab)
   }
 }
-$('btn-add-room').onclick = () => { renderGroupFriends(); showModal('modal-room') }
+$('btn-add-room').onclick = () => { closeDrawer(); renderGroupFriends(); showModal('modal-room', 'room-name-input') }
+$('btn-close-room-x').onclick = () => hideModal('modal-room')
 $('btn-create-group').onclick = () => {
   const name = $('group-name-input').value.trim()
   const members = [...$('group-friends').querySelectorAll('input:checked')].map(c => c.value)
@@ -699,6 +921,8 @@ $('btn-join-room').onclick = () => {
 }
 
 $('btn-home').onclick = () => {
+  closeDrawer()
+  $('member-list').classList.remove('panel-open')
   activeConv = null
   history.replaceState(null, '', location.pathname)
   render(); renderMessages()
@@ -757,6 +981,14 @@ function applyMention (name) {
 document.addEventListener('click', (e) => {
   const p = $('mention-pop')
   if (p && !p.classList.contains('hidden') && !p.contains(e.target) && e.target !== $('msg-input')) hideMentionPop()
+})
+
+document.addEventListener('pointerdown', (e) => {
+  const panel = $('member-list')
+  if (panel.classList.contains('panel-open') && !panel.contains(e.target) && !e.target.closest('.members-toggle')) {
+    panel.classList.remove('panel-open')
+    syncMemberPanel()
+  }
 })
 
 // mesaj gönderme + yazıyor sinyali
@@ -866,10 +1098,20 @@ document.addEventListener('click', (e) => {
 })
 
 // arama
-$('btn-search').onclick = () => { showModal('modal-search'); $('search-input').focus() }
+$('btn-search').onclick = () => showModal('modal-search', 'search-input')
+$('btn-close-search').onclick = () => hideModal('modal-search')
 document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); $('btn-search').onclick() }
-  if (e.key === 'Escape') ['modal-search', 'modal-room', 'modal-transfer'].forEach(hideModal)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && !topVisibleModal() && $('settings').classList.contains('hidden')) { e.preventDefault(); $('btn-search').onclick() }
+  if (e.key === 'Escape') {
+    const top = topVisibleModal()
+    if (top) {
+      if (top.id === 'modal-search' || top.id === 'modal-room' || top.id === 'modal-transfer' || (top.id === 'modal-profile' && state.me.name)) hideModal(top.id)
+      return
+    }
+    $('member-list').classList.remove('panel-open')
+    syncMemberPanel()
+    closeDrawer()
+  }
 })
 let searchT = null
 $('search-input').oninput = () => {
@@ -888,13 +1130,17 @@ function renderSearchResults (m) {
       : '⌂ ' + (state.rooms.find(x => 'room-' + x.topic === r.conv)?.name || 'oda') + (r.msg.ch ? ' · #' + r.msg.ch : '')
     el.innerHTML = `<div class="sr-top">${esc(where)} · ${esc(r.msg.name)} · ${fmtTime(r.msg.ts)}</div>
       <div class="sr-text">${esc(r.msg.text || (r.msg.file && '📎 ' + r.msg.file.fname) || '')}</div>`
-    el.onclick = () => { hideModal('modal-search'); openConvById(r.conv) }
+    el.setAttribute('role', 'button')
+    el.setAttribute('tabindex', '0')
+    el.onclick = () => { hideModal('modal-search', false); openConvById(r.conv) }
+    el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } }
     box.appendChild(el)
   }
 }
 
 // hesap taşıma
-$('btn-transfer').onclick = () => { $('export-box').value = ''; $('import-box').value = ''; send({ t: 'export' }); showModal('modal-transfer') }
+$('btn-transfer').onclick = () => { $('export-box').value = ''; $('import-box').value = ''; send({ t: 'export' }); showModal('modal-transfer', 'btn-close-transfer-x') }
+$('btn-close-transfer-x').onclick = () => hideModal('modal-transfer')
 $('btn-close-transfer').onclick = () => hideModal('modal-transfer')
 $('btn-copy-export').onclick = () => copyText($('export-box').value, $('btn-copy-export'), 'Kopyalandı ✓', 'Kopyala')
 $('btn-do-import').onclick = () => {
@@ -987,12 +1233,54 @@ if (window.TurkuazNative) {
 }
 
 // ---- mobil çekmece (drawer): dar ekranda sol menü ----
-function closeDrawer () { document.body.classList.remove('drawer-open') }
-function toggleDrawer () { document.body.classList.toggle('drawer-open') }
+function syncDrawerButton () {
+  const mobile = window.innerWidth < 761
+  const open = mobile && document.body.classList.contains('drawer-open')
+  $('btn-menu').setAttribute('aria-expanded', open ? 'true' : 'false')
+  $('btn-menu').setAttribute('aria-label', open ? 'Menüyü kapat' : 'Menüyü aç')
+  $('drawer-back').setAttribute('aria-hidden', open ? 'false' : 'true')
+  for (const id of ['rail', 'sidebar']) {
+    const el = $(id)
+    el.inert = mobile && !open
+    el.setAttribute('aria-hidden', mobile && !open ? 'true' : 'false')
+  }
+  for (const id of ['messages', 'composer', 'channel-tabs', 'chat-actions', 'livingroom', 'theater']) {
+    const el = $(id)
+    if (el) el.inert = open
+  }
+  syncMemberPanel()
+}
+function closeDrawer () {
+  const focusedInDrawer = $('rail').contains(document.activeElement) || $('sidebar').contains(document.activeElement)
+  if (focusedInDrawer && window.innerWidth < 761) $('btn-menu').focus()
+  document.body.classList.remove('drawer-open')
+  syncDrawerButton()
+}
+function toggleDrawer () {
+  const opening = !document.body.classList.contains('drawer-open')
+  if (opening) $('member-list').classList.remove('panel-open')
+  document.body.classList.toggle('drawer-open')
+  syncDrawerButton()
+  setTimeout(() => (opening ? $('btn-home') : $('btn-menu')).focus(), 0)
+}
 $('btn-menu').onclick = toggleDrawer
 $('drawer-back').onclick = closeDrawer
 // dar ekranda ilk açılışta menü açık gelsin (sohbet seçili değilse)
 if (window.innerWidth < 761 && !activeConv) document.body.classList.add('drawer-open')
+syncDrawerButton()
+window.addEventListener('resize', () => {
+  if (window.innerWidth >= 761) document.body.classList.remove('drawer-open')
+  else if (!document.body.classList.contains('drawer-open') && ($('rail').contains(document.activeElement) || $('sidebar').contains(document.activeElement))) $('btn-menu').focus()
+  if (window.innerWidth > 1120) $('member-list').classList.remove('panel-open')
+  syncMemberPanel()
+  syncDrawerButton()
+})
+
+window.addEventListener('focus', markActiveRead)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') markActiveRead()
+})
 
 Transport.start()
+syncUnreadUI()
 renderMessages()

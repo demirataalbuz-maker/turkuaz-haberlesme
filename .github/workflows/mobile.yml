@@ -76,6 +76,7 @@ jobs:
         run: |
           cp mobile/android/app/build/outputs/apk/release/app-release.apk "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk"
           gh release create "$GITHUB_REF_NAME" \
+            --prerelease \
             --title "Turkuaz Android $GITHUB_REF_NAME" \
             --notes "Android APK (deneysel). İndirip kur: bilinmeyen kaynaklara izin vermen gerekir. Masaüstüyle aynı P2P ağına bağlanır." \
             "Turkuaz-${GITHUB_REF_NAME#mobile-}.apk" \

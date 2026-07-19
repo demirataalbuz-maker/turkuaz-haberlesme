@@ -1,12 +1,15 @@
 // Turkuaz masaüstü uygulaması: server.js'i aynı süreçte başlatır ve
 // arayüzü bir pencerede açar. Pencere kapatılınca tepsiye küçülür,
 // mesajlar gelmeye devam eder.
-const { app, BrowserWindow, session, Tray, Menu, desktopCapturer, Notification, ipcMain } = require('electron')
+const { app, BrowserWindow, session, Tray, Menu, desktopCapturer, Notification, ipcMain, dialog, globalShortcut } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const net = require('net')
+const { createDesktopUpdater } = require('./lib/desktop-updater')
 
+const APP_ID = 'dev.turkuaz.app'
 const PORT = parseInt(process.env.PORT || '3210', 10)
+const APP_ORIGIN = 'http://127.0.0.1:' + PORT
 process.env.PORT = String(PORT)
 if (!process.env.TURKUAZ_DATA && !process.env.PEERCORD_DATA) {
   process.env.TURKUAZ_DATA = path.join(app.getPath('userData'), 'data')
@@ -16,10 +19,13 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 // Pencere arkadayken zamanlayıcı kısılmasın: arama/oyun/ses arka planda da aksın
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
+// Wayland'da Electron global kısayollarını masaüstü portalına kaydeder.
+if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
 if (process.env.PEERCORD_FAKE_MEDIA || process.env.TURKUAZ_FAKE_MEDIA) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 }
+app.setAppUserModelId(APP_ID)
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -34,20 +40,58 @@ function portInUse (port) {
 let win = null
 let tray = null
 let quitting = false
-let updateReady = null // indirilen sürüm no'su (tepsi menüsünde gösterilir)
+let trayStateKey = ''
+let updateController = null
+let updateNotification = null
+let callNotification = null
+let lastMuteShortcutAt = 0
+let muteShortcutRegistered = false
+let updateState = {
+  status: 'idle', currentVersion: app.getVersion(), version: null,
+  percent: 0, manual: false, error: null, lastCheckedAt: null
+}
+
+function publishUpdateState (next) {
+  updateState = { ...updateState, ...next }
+  if (win && !win.isDestroyed()) {
+    try { win.webContents.send('turkuaz-update-state', updateState) } catch {}
+  }
+  refreshTrayUpdateState()
+}
+
+function refreshTrayUpdateState () {
+  if (tray) {
+    const key = updateState.status + ':' + (updateState.version || '') + ':' +
+      (updateState.status === 'downloading' ? Math.floor((updateState.percent || 0) / 5) : '')
+    if (key === trayStateKey) return
+    trayStateKey = key
+    try {
+      tray.setContextMenu(trayMenu())
+      tray.setToolTip(updateState.status === 'ready'
+        ? 'Turkuaz — v' + updateState.version + ' güncellemesi hazır'
+        : 'Turkuaz — çalışıyor')
+    } catch {}
+  }
+}
 
 function trayMenu () {
   const items = [
     { label: 'Turkuaz\'ı Göster', click: () => { win.show(); win.focus() } }
   ]
-  if (updateReady) {
-    items.push(
-      { type: 'separator' },
-      {
-        label: 'v' + updateReady + ' güncellemesini kur (yeniden başlar)',
-        click: () => { require('electron-updater').autoUpdater.quitAndInstall() }
-      }
-    )
+  items.push({ type: 'separator' })
+  if (updateState.status === 'ready') {
+    items.push({
+      label: 'v' + updateState.version + ' güncellemesini kur (yeniden başlat)',
+      click: () => updateController && updateController.install()
+    })
+  } else if (updateState.status === 'downloading') {
+    items.push({ label: 'Güncelleme indiriliyor — %' + Math.round(updateState.percent || 0), enabled: false })
+  } else if (updateState.status === 'checking') {
+    items.push({ label: 'Güncellemeler denetleniyor…', enabled: false })
+  } else if (updateState.status === 'disabled') {
+    items.push({ label: 'Otomatik güncelleme bu pakette kullanılamıyor', enabled: false })
+  } else {
+    items.push({ label: 'Güncellemeleri denetle', click: () => updateController && updateController.check(true) })
   }
   items.push(
     { type: 'separator' },
@@ -56,47 +100,98 @@ function trayMenu () {
   return Menu.buildFromTemplate(items)
 }
 
-// Otomatik güncelleme: yalnızca AppImage olarak paketliyken çalışır.
-// Feed = GitHub Releases (latest-linux.yml + AppImage); TURKUAZ_UPDATE_URL
-// ile kendi feed'ine yönlendirebilirsin. İndirilen dosya sha512 ile doğrulanır,
-// kurulum uygulama kapanırken yapılır (autoInstallOnAppQuit).
-function setupAutoUpdate () {
-  if (!app.isPackaged) return // geliştirmede (npm run app) güncelleme yok
-  // Linux'ta electron-updater YALNIZCA AppImage'ı destekler; Windows/mac paketleri sorunsuz.
-  if (process.platform === 'linux' && !process.env.APPIMAGE) return
-  let autoUpdater
-  try { ({ autoUpdater } = require('electron-updater')) } catch { return }
-  const testMode = !!process.env.TURKUAZ_UPDATE_TEST
-  if (process.env.TURKUAZ_UPDATE_URL) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: process.env.TURKUAZ_UPDATE_URL })
+function updateLogger () {
+  const file = path.join(app.getPath('userData'), 'update.log')
+  try {
+    if (fs.existsSync(file) && fs.statSync(file).size > 1024 * 1024) {
+      try { fs.rmSync(file + '.old', { force: true }) } catch {}
+      fs.renameSync(file, file + '.old')
+    }
+  } catch {}
+  const write = (level, args) => {
+    const line = args.map(v => {
+      if (v instanceof Error) return v.stack || v.message
+      if (typeof v === 'object') { try { return JSON.stringify(v) } catch {} }
+      return String(v)
+    }).join(' ')
+    try { fs.appendFileSync(file, new Date().toISOString() + ' [' + level + '] ' + line + '\n') } catch {}
   }
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.on('update-downloaded', (info) => {
-    updateReady = info.version
-    console.log('güncelleme indirildi: v' + info.version)
-    if (tray) { tray.setContextMenu(trayMenu()); tray.setToolTip('Turkuaz — v' + info.version + ' güncellemesi hazır') }
-    if (testMode) { autoUpdater.quitAndInstall() ; return }
+  return {
+    info: (...args) => write('info', args),
+    warn: (...args) => write('warn', args),
+    error: (...args) => write('error', args),
+    debug: (...args) => write('debug', args)
+  }
+}
+
+// Paketli Windows NSIS ve Linux AppImage sürümlerinde GitHub Releases'i izler.
+// İndirilen güncelleme kullanıcı isterse hemen, aksi halde normal çıkışta kurulur.
+function setupAutoUpdate () {
+  if (!app.isPackaged) {
+    publishUpdateState({ status: 'disabled', reason: 'Geliştirme sürümünde otomatik güncelleme kapalı.' })
+    return
+  }
+  // Linux'ta electron-updater yalnız AppImage paketini yerinde günceller.
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    publishUpdateState({ status: 'disabled', reason: 'Linux otomatik güncellemesi yalnız AppImage paketinde çalışır.' })
+    return
+  }
+  if (process.platform === 'linux') {
     try {
-      new Notification({
-        title: 'Turkuaz güncellemesi hazır',
-        body: 'v' + info.version + ' indirildi — uygulamayı kapatınca kurulur. Tepsiden hemen de kurabilirsin.'
-      }).show()
-    } catch {}
+      fs.accessSync(process.env.APPIMAGE, fs.constants.W_OK)
+      fs.accessSync(path.dirname(process.env.APPIMAGE), fs.constants.W_OK)
+    } catch {
+      publishUpdateState({ status: 'disabled', reason: 'AppImage konumu yazılabilir değil; dosyayı kendi kullanıcı klasörüne taşı.' })
+      return
+    }
+  }
+  let autoUpdater
+  try { ({ autoUpdater } = require('electron-updater')) } catch {
+    publishUpdateState({ status: 'disabled', reason: 'Güncelleme modülü yüklenemedi.' })
+    return
+  }
+  const logger = updateLogger()
+  autoUpdater.logger = logger
+
+  updateController = createDesktopUpdater({
+    autoUpdater,
+    currentVersion: app.getVersion(),
+    logger,
+    publish: publishUpdateState,
+    notify: (state) => {
+      if (!Notification.isSupported()) return
+      try {
+        updateNotification = new Notification({
+          title: 'Turkuaz güncellemesi hazır',
+          body: 'v' + state.version + ' indirildi. Şimdi yeniden başlatabilir veya normal çıkışta kurulmasını bekleyebilirsin.'
+        })
+        updateNotification.on('click', () => { if (win) { win.show(); win.focus() } })
+        updateNotification.once('close', () => { updateNotification = null })
+        updateNotification.show()
+      } catch {}
+    }
   })
-  autoUpdater.on('error', (e) => { if (testMode) console.log('güncelleme hatası:', String(e)) }) // çevrimdışı vs. — sessiz geç
-  const check = () => autoUpdater.checkForUpdates().catch(() => {})
-  setTimeout(check, testMode ? 2000 : 15000)       // açılışta ağı hemen yorma
-  setInterval(check, 4 * 60 * 60 * 1000)           // sonra 4 saatte bir
+  updateController.start()
 }
 
 async function start () {
   await app.whenReady()
 
-  session.defaultSession.setPermissionRequestHandler((wc, permission, cb) => {
+  const allowedPermissions = ['media', 'notifications', 'display-capture', 'clipboard-sanitized-write', 'fullscreen', 'speaker-selection']
+  const trustedUrl = (value) => {
+    try { return new URL(value).origin === APP_ORIGIN } catch { return false }
+  }
+  const trustedWebContents = (wc) => !!win && !win.isDestroyed() && wc === win.webContents
+
+  session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    return trustedWebContents(wc) && details.isMainFrame && trustedUrl(requestingOrigin) &&
+      (!details.requestingUrl || trustedUrl(details.requestingUrl)) && allowedPermissions.includes(permission)
+  })
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
     // clipboard-sanitized-write olmadan navigator.clipboard.writeText reddedilir;
     // fullscreen olmadan video.requestFullscreen() sessizce reddedilir (⛶/çift tık)
-    cb(['media', 'notifications', 'display-capture', 'clipboard-sanitized-write', 'fullscreen', 'speaker-selection'].includes(permission))
+    const trusted = trustedWebContents(wc) && details.isMainFrame && trustedUrl(details.requestingUrl)
+    cb(trusted && allowedPermissions.includes(permission))
   })
   // desktopCapturer.getSources Wayland'da xdg-desktop-portal'a gider; portal
   // takılırsa promise HİÇ dönmeyebiliyor → her çağrıyı zaman aşımıyla sar,
@@ -108,6 +203,8 @@ async function start () {
 
   // Ekran paylaşımında birincil ekranı ver (kendi seçim arayüzümüz yok)
   session.defaultSession.setDisplayMediaRequestHandler((req, cb) => {
+    if (!win || win.isDestroyed() || !req.frame ||
+        req.frame !== win.webContents.mainFrame || !trustedUrl(req.securityOrigin)) return cb({})
     getSourcesSafe({ types: ['screen'] }).then(sources => {
       if (!sources.length) return cb({})
       const res = { video: sources[0] }
@@ -118,19 +215,92 @@ async function start () {
   })
 
   if (await portInUse(PORT)) {
-    console.log('Port ' + PORT + ' dolu — zaten çalışan Turkuaz\'a bağlanılıyor')
-  } else {
-    require('./server')
-    await sleep(400)
+    dialog.showErrorBox(
+      'Turkuaz başlatılamadı',
+      'Yerel ' + PORT + ' portu başka bir uygulama tarafından kullanılıyor. O uygulamayı kapatıp Turkuaz\'ı yeniden aç.'
+    )
+    quitting = true
+    app.quit()
+    return
   }
+  require('./server')
+  await sleep(400)
 
   const iconPath = path.join(__dirname, 'build', 'icon.png')
+  function trustedRenderer (event) {
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return false
+    if (!event.senderFrame || event.senderFrame !== win.webContents.mainFrame) return false
+    try {
+      return new URL(event.senderFrame.url).origin === APP_ORIGIN
+    } catch { return false }
+  }
+  function requireTrustedRenderer (event) {
+    if (!trustedRenderer(event)) throw new Error('Yetkisiz Turkuaz IPC isteği')
+  }
+
   // Ekran paylaşımı için kaynak (ekran) listesi — kendi seçicimizi göstermek için
-  ipcMain.handle('turkuaz-get-sources', async () => {
+  ipcMain.handle('turkuaz-get-sources', async (event) => {
+    requireTrustedRenderer(event)
     try {
       const sources = await getSourcesSafe({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
       return sources.map(s => ({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL() }))
     } catch { return [] }
+  })
+  ipcMain.handle('turkuaz-update-get-state', (event) => {
+    requireTrustedRenderer(event)
+    return { ...updateState }
+  })
+  ipcMain.handle('turkuaz-update-check', async (event) => {
+    requireTrustedRenderer(event)
+    if (!updateController) return { ...updateState }
+    return updateController.check(true)
+  })
+  ipcMain.handle('turkuaz-update-install', (event) => {
+    requireTrustedRenderer(event)
+    return !!(updateController && updateController.install())
+  })
+  ipcMain.handle('turkuaz-call-notify', (event, rawName) => {
+    requireTrustedRenderer(event)
+    if (!Notification.isSupported()) return false
+    const callerName = String(rawName || '')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 64) || 'Bir arkadaşın'
+    try {
+      if (callNotification) callNotification.close()
+      const notification = new Notification({
+        title: 'Turkuaz gelen arama',
+        body: callerName + ' seni arıyor.'
+      })
+      callNotification = notification
+      notification.on('click', () => {
+        if (!win || win.isDestroyed()) return
+        if (win.isMinimized()) win.restore()
+        win.show()
+        win.focus()
+      })
+      notification.once('close', () => {
+        if (callNotification === notification) callNotification = null
+      })
+      notification.show()
+      return true
+    } catch {
+      callNotification = null
+      return false
+    }
+  })
+  ipcMain.handle('turkuaz-call-clear', (event) => {
+    requireTrustedRenderer(event)
+    if (!callNotification) return false
+    const notification = callNotification
+    callNotification = null
+    try { notification.close() } catch {}
+    return true
+  })
+  ipcMain.handle('turkuaz-shortcut-global-mute-active', (event) => {
+    requireTrustedRenderer(event)
+    return muteShortcutRegistered
   })
 
   win = new BrowserWindow({
@@ -140,9 +310,27 @@ async function start () {
     title: 'Turkuaz',
     autoHideMenuBar: true,
     icon: iconPath,
-    webPreferences: { preload: path.join(__dirname, 'preload.js') }
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
   })
   win.loadURL('http://127.0.0.1:' + PORT)
+
+  // Oyun veya başka bir pencere odaktayken de mikrofonu tek tuşla sustur/aç.
+  // Kısa debounce, işletim sisteminin basılı tuş tekrarının durumu hızla tersine
+  // çevirmesini önler; renderer yalnız bu dar olayı dinleyebilir.
+  try {
+    muteShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+M', () => {
+      const now = Date.now()
+      if (now - lastMuteShortcutAt < 500) return
+      lastMuteShortcutAt = now
+      if (!win || win.isDestroyed()) return
+      try { win.webContents.send('turkuaz-shortcut-toggle-mute') } catch {}
+    })
+  } catch { muteShortcutRegistered = false }
 
   // kapat → tepsiye küçül
   win.on('close', (e) => {
@@ -151,8 +339,10 @@ async function start () {
 
   try {
     tray = new Tray(iconPath)
+    trayStateKey = ''
     tray.setToolTip('Turkuaz — çalışıyor')
     tray.setContextMenu(trayMenu())
+    refreshTrayUpdateState()
     tray.on('click', () => { win.show(); win.focus() })
   } catch {}
 
@@ -199,5 +389,28 @@ async function start () {
 }
 
 app.on('before-quit', () => { quitting = true })
+app.on('will-quit', () => {
+  try {
+    if (app.isReady()) globalShortcut.unregister('CommandOrControl+Shift+M')
+  } catch {}
+  muteShortcutRegistered = false
+})
 app.on('window-all-closed', () => { if (quitting) app.quit() })
-start()
+
+// Normal kullanımda tek backend/updater örneği çalışsın. İki-Electron A/V testi
+// sahte medya bayrağıyla bilinçli olarak birden çok örnek açar.
+const allowMultiple = !!(process.env.TURKUAZ_ALLOW_MULTIPLE || process.env.TURKUAZ_FAKE_MEDIA || process.env.PEERCORD_FAKE_MEDIA)
+const hasSingleInstanceLock = allowMultiple || app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  if (!allowMultiple) {
+    app.on('second-instance', () => {
+      if (!win) return
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    })
+  }
+  start()
+}

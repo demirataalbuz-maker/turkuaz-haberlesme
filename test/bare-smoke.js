@@ -1,8 +1,8 @@
 // Bare duman testi: mobil çekirdeğin (lib/core.js) Bare runtime'ında GERÇEKTEN
 // çalıştığını doğrular — telefondaki backend ile aynı kod yolu.
 //   node test/bare-smoke.js
-// Akış: yerel DHT bootstrap → 2 Bare süreci (Ali/Veli) → arkadaşlık → DM →
-// teslim onayı (ack/pending) → oda kur/katıl → oda mesajı.
+// Akış: yerel DHT bootstrap → 2 Bare süreci (Ali/Veli) → Veli çevrimdışıyken
+// arkadaşlık isteği → Veli yeniden açılınca teslim → DM/ack → oda mesajı.
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
@@ -52,7 +52,10 @@ class BareUser {
   _onMsg (m) {
     this.raw.push(m)
     if (m.t === 'bare-error') fail(this.name + ' Bare çekirdeği çöktü:\n' + m.err)
-    if (m.t === 'bare-ready') this.code = m.code
+    if (m.t === 'bare-ready') {
+      this.code = m.code
+      this.send({ t: '__ready' })
+    }
     if (m.t === 'state') this.state = m
     if (m.t === 'msg') this.msgs.push(m)
     for (const w of [...this.waiters]) {
@@ -76,7 +79,7 @@ class BareUser {
     })
   }
 
-  kill () { try { this.proc.kill() } catch {} }
+  kill () { try { this.proc.kill('SIGKILL') } catch {} }
 }
 
 async function main () {
@@ -86,16 +89,26 @@ async function main () {
 
   console.log('--- 1) İki Bare çekirdeği başlıyor (telefondakiyle aynı kod)')
   const ali = new BareUser('ali')
-  const veli = new BareUser('veli')
+  let veli = new BareUser('veli')
   await ali.wait('bare-ready', u => !!u.code, 20000)
   await veli.wait('bare-ready', u => !!u.code, 20000)
   console.log('PASS: iki çekirdek Bare üzerinde açıldı (' + ali.raw.find(m => m.t === 'bare-ready').bare + ')')
 
   ali.send({ t: 'set-profile', name: 'Ali' })
   veli.send({ t: 'set-profile', name: 'Veli' })
+  await ali.wait('profil kaydedildi', u => u.state && u.state.me.name === 'Ali')
+  await veli.wait('profil kaydedildi', u => u.state && u.state.me.name === 'Veli')
 
-  console.log('--- 2) Arkadaşlık (istek + kabul)')
-  ali.send({ t: 'add-friend', code: veli.code })
+  console.log('--- 2) Arkadaşlık (hedef çevrimdışı → yeniden açılınca istek + kabul)')
+  const veliCode = veli.code
+  const veliStopped = new Promise(resolve => veli.proc.once('exit', resolve))
+  veli.kill()
+  await veliStopped
+  ali.send({ t: 'add-friend', code: veliCode })
+  await ali.wait('çevrimdışı istek kuyruğa alındı', u => u.state && u.state.friends.some(f => f.code === veliCode && f.status === 'pending-out'))
+
+  veli = new BareUser('veli')
+  await veli.wait('yeniden bare-ready', u => u.code === veliCode, 20000)
   await veli.wait('istek geldi', u => u.state && u.state.requests.some(r => r.code === ali.code))
   veli.send({ t: 'accept-request', code: ali.code })
   await ali.wait('arkadaş + çevrimiçi', u => u.state && u.state.friends.some(f => f.code === veli.code && f.status === 'friend' && f.online))

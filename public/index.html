@@ -5,63 +5,88 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Turkuaz</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="menu.css">
 </head>
 <body>
 <div id="app">
   <!-- Sol ray: logo + odalar -->
-  <nav id="rail">
-    <div class="rail-logo" id="btn-home" title="Arkadaşlar">
-      <svg viewBox="0 0 48 48" width="30" height="30"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs><text x="24" y="34" font-family="Arial" font-size="30" font-weight="900" fill="url(#lg)" text-anchor="middle">T</text></svg>
-    </div>
+  <nav id="rail" aria-label="Odalar ve ana sayfa">
+    <button class="rail-logo" id="btn-home" title="Ana sayfa" aria-label="Ana sayfa">
+      <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="6" y1="5" x2="42" y2="43" gradientUnits="userSpaceOnUse"><stop stop-color="#6ee7d8"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient></defs>
+        <rect x="3" y="3" width="42" height="42" rx="14" fill="url(#lg)"/>
+        <path d="M11 27c4.8-5.7 9.3-5.7 13.8 0 4.3 5.4 8.4 5.4 12.2.1" fill="none" stroke="#062b2b" stroke-width="4" stroke-linecap="round"/>
+        <path d="M13 19h22" fill="none" stroke="#effffc" stroke-opacity=".82" stroke-width="3" stroke-linecap="round"/>
+      </svg>
+    </button>
     <div class="rail-sep"></div>
     <div id="rail-rooms"></div>
-    <div class="rail-btn add" id="btn-add-room" title="Oda kur / katıl">+</div>
+    <button class="rail-btn add" id="btn-add-room" title="Oda kur veya katıl" aria-label="Oda kur veya katıl">+</button>
   </nav>
 
   <!-- Orta kolon -->
   <aside id="sidebar">
     <header id="sidebar-head">
-      <span class="wordmark">turkuaz</span>
-      <span class="p2p-badge">P2P</span>
-      <span id="ver-badge" title="Sürüm"></span>
-      <button id="btn-search" title="Mesajlarda ara (Ctrl+K)">⌕</button>
+      <div class="brand-lockup">
+        <span class="wordmark">turkuaz</span>
+        <span class="p2p-badge">P2P</span>
+        <span id="ver-badge" title="Sürüm"></span>
+      </div>
+      <button id="btn-search" title="Mesajlarda ara (Ctrl+K)" aria-label="Mesajlarda ara">
+        <span class="search-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg> Ara</span>
+        <kbd>Ctrl K</kbd>
+      </button>
     </header>
     <div id="sidebar-body">
-      <div class="section-title">KODUM</div>
+      <div class="section-title"><span>KODUM</span></div>
       <div id="my-code-box">
         <code id="my-code">...</code>
-        <button id="btn-copy-code" title="Kopyala">⧉</button>
+        <button class="icon-button" id="btn-copy-code" title="Kopyala" aria-label="Arkadaş kodunu kopyala"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></button>
       </div>
-      <div class="section-title">ARKADAŞ EKLE</div>
+      <div class="section-title"><span>ARKADAŞ EKLE</span></div>
       <div id="add-friend-row">
         <input id="friend-code-input" placeholder="arkadaş kodunu yapıştır" spellcheck="false">
         <button id="btn-add-friend">Ekle</button>
       </div>
       <div id="requests-wrap">
-        <div class="section-title">GELEN İSTEKLER</div>
+        <div class="section-title"><span>GELEN İSTEKLER</span></div>
         <div id="requests"></div>
       </div>
-      <div class="section-title">DİREKT MESAJLAR</div>
+      <div class="section-title"><span>DİREKT MESAJLAR</span></div>
       <div id="dm-list"></div>
     </div>
+    <section id="voice-dock" class="hidden" aria-label="Aktif sesli sohbet" aria-live="polite">
+      <button id="voice-dock-return" class="voice-dock-main" type="button" title="Sesli odaya dön">
+        <span class="voice-dock-signal" aria-hidden="true"></span>
+        <span class="voice-dock-copy"><b id="voice-dock-room">Sesli sohbet</b><small id="voice-dock-status">Bağlanıyor…</small></span>
+      </button>
+      <div class="voice-dock-actions">
+        <button id="voice-dock-mute" type="button" title="Mikrofonu sustur (Ctrl+Shift+M)" aria-label="Mikrofonu sustur">🎙️</button>
+        <button id="voice-dock-leave" type="button" title="Sesli sohbetten ayrıl" aria-label="Sesli sohbetten ayrıl">↗</button>
+      </div>
+    </section>
     <footer id="me-card">
       <div class="avatar" id="me-avatar">?</div>
       <div class="me-info">
         <div id="me-name">...</div>
         <div class="me-sub" id="me-status">çevrimiçi</div>
       </div>
-      <button id="btn-transfer" title="Hesabı taşı (dışa/içe aktar)">⇄</button>
-      <button id="btn-settings" title="Ayarlar">⚙</button>
-      <button id="btn-edit-profile" title="Profili düzenle">✎</button>
+      <div class="me-actions">
+        <button class="icon-button" id="btn-transfer" title="Hesabı taşı (dışa/içe aktar)" aria-label="Hesabı taşı"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h15m0 0-3-3m3 3-3 3M20 17H5m0 0 3-3m-3 3 3 3"/></svg></button>
+        <button class="icon-button" id="btn-settings" title="Ayarlar" aria-label="Ayarlar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m4 0h5M4 17h4m4 0h8M11 4v6M8 14v6"/><circle cx="13" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
+        <button class="icon-button" id="btn-edit-profile" title="Profili düzenle" aria-label="Profili düzenle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m14 7 3 3"/></svg></button>
+      </div>
     </footer>
   </aside>
 
   <!-- Ana panel -->
   <main id="chat">
     <header id="chat-head">
-      <button id="btn-menu" title="Menü">☰</button>
-      <span id="chat-title">Turkuaz'a hoş geldin</span>
-      <span id="chat-sub"></span>
+      <button id="btn-menu" title="Menü" aria-label="Menüyü aç" aria-controls="rail sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="chat-identity">
+        <span id="chat-title">Turkuaz'a hoş geldin</span>
+        <span id="chat-sub"></span>
+      </div>
       <span id="chat-actions"></span>
     </header>
     <div id="channel-tabs" class="hidden"></div>
@@ -75,7 +100,8 @@
         </div>
       </div>
       <div id="lr-controls" class="hidden">
-        <span class="lr-hint">🛋️ Balonunu sürükle — sesler bulunduğun yönden gelir</span>
+        <span id="lr-connection" class="lr-connection" data-quality="connecting" role="status" aria-live="polite">● Ses hazırlanıyor</span>
+        <span class="lr-hint">Balonunu sürükle — sesler bulunduğun yönden gelir</span>
         <button id="btn-mic">🎙️ Sustur</button>
         <button id="btn-cam">📷 Kamera</button>
         <button id="btn-screen">🖥️ Ekran paylaş</button>
@@ -105,13 +131,18 @@
   </main>
 
   <!-- Oda üye listesi (sağ panel) -->
-  <aside id="member-list" class="hidden"></aside>
+  <aside id="member-list" class="hidden" aria-label="Oda üyeleri"></aside>
 </div>
 <!-- mobil çekmece arka planı -->
-<div id="drawer-back"></div>
+<div id="drawer-back" aria-hidden="true"></div>
+<div id="connection-banner" class="hidden" role="status" aria-live="assertive">
+  <span class="connection-dot" aria-hidden="true"></span>
+  <span id="connection-banner-text">Turkuaz bağlantısı yeniden kuruluyor…</span>
+</div>
+<div id="toast-region" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <!-- DM arama widget'ı -->
-<div id="call-widget" class="hidden">
+<div id="call-widget" class="hidden" role="region" aria-label="Aktif arama kontrolleri" aria-hidden="true">
   <div id="call-head">
     <span id="call-name"></span>
     <span id="call-time"></span>
@@ -121,30 +152,31 @@
     <video id="call-local" autoplay playsinline muted></video>
   </div>
   <div id="call-btns">
-    <button id="call-mute">🎙️</button>
-    <button id="call-cam">📷</button>
-    <button id="call-screen">🖥️</button>
-    <button id="call-sndpad">🎵</button>
-    <button id="call-end" class="danger">📞</button>
+    <button id="call-mute" aria-label="Mikrofonu aç veya kapat" title="Mikrofon">🎙️</button>
+    <button id="call-cam" aria-label="Kamerayı aç veya kapat" title="Kamera">📷</button>
+    <button id="call-screen" aria-label="Ekran paylaşımını aç veya kapat" title="Ekran paylaş">🖥️</button>
+    <button id="call-sndpad" aria-label="Ses panelini aç" title="Ses paneli">🎵</button>
+    <button id="call-end" class="danger" aria-label="Aramayı bitir" title="Aramayı bitir">📞</button>
   </div>
 </div>
 
 <!-- Gelen arama modalı -->
-<div class="modal-back hidden" id="modal-ring">
+<div class="modal-back hidden" id="modal-ring" role="dialog" aria-modal="true" aria-label="Gelen arama" aria-hidden="true">
   <div class="modal ring">
     <div class="ring-avatar" id="ring-avatar">📞</div>
     <h2 id="ring-name">...</h2>
     <p id="ring-sub">seni arıyor...</p>
     <div class="modal-btns center">
-      <button class="round-btn accept" id="btn-ring-accept">✓</button>
-      <button class="round-btn reject" id="btn-ring-reject">✕</button>
+      <button class="round-btn accept" id="btn-ring-accept" aria-label="Aramayı kabul et" title="Kabul et">✓</button>
+      <button class="round-btn reject" id="btn-ring-reject" aria-label="Aramayı reddet" title="Reddet">✕</button>
     </div>
   </div>
 </div>
 
 <!-- Profil modalı -->
-<div class="modal-back hidden" id="modal-profile">
+<div class="modal-back hidden" id="modal-profile" role="dialog" aria-modal="true" aria-label="Profil" aria-hidden="true">
   <div class="modal">
+    <button class="modal-x" id="btn-close-profile" type="button" title="Kapat" aria-label="Profili kapat">✕</button>
     <h2>Profil</h2>
     <p>Bu bilgiler sadece bağlandığın kişilere gider — ortada sunucu yok.</p>
     <div class="section-title">İSİM</div>
@@ -160,8 +192,9 @@
 </div>
 
 <!-- Oda modalı -->
-<div class="modal-back hidden" id="modal-room">
+<div class="modal-back hidden" id="modal-room" role="dialog" aria-modal="true" aria-label="Oda oluştur veya katıl" aria-hidden="true">
   <div class="modal">
+    <button class="modal-x" id="btn-close-room-x" type="button" title="Kapat" aria-label="Oda penceresini kapat">✕</button>
     <h2>Oda</h2>
     <p>Yeni oda kur, davet kodunu arkadaşlarına gönder — ya da gelen kodla katıl.</p>
     <div class="section-title">YENİ ODA KUR</div>
@@ -181,16 +214,18 @@
 </div>
 
 <!-- Arama (mesajlarda) -->
-<div class="modal-back hidden" id="modal-search">
+<div class="modal-back hidden" id="modal-search" role="dialog" aria-modal="true" aria-label="Mesajlarda ara" aria-hidden="true">
   <div class="modal search">
+    <button class="modal-x" id="btn-close-search" type="button" title="Kapat" aria-label="Aramayı kapat">✕</button>
     <input id="search-input" placeholder="mesajlarda ara..." autocomplete="off">
     <div id="search-results"></div>
   </div>
 </div>
 
 <!-- Hesap taşıma -->
-<div class="modal-back hidden" id="modal-transfer">
+<div class="modal-back hidden" id="modal-transfer" role="dialog" aria-modal="true" aria-label="Hesabı taşı" aria-hidden="true">
   <div class="modal">
+    <button class="modal-x" id="btn-close-transfer-x" type="button" title="Kapat" aria-label="Hesap taşıma penceresini kapat">✕</button>
     <h2>Hesabı taşı</h2>
     <p>Kimliğini, arkadaşlarını ve odalarını başka bilgisayara taşı.
        <b>Yazışmalar bu bilgisayarda kalır.</b> Aşağıdaki metin kimliğindir —
@@ -208,10 +243,14 @@
 </div>
 
 <!-- Ayarlar ekranı (Discord-tarzı: sol kategori + sağ panel) -->
-<div id="settings" class="hidden">
+<div id="settings" class="hidden" role="dialog" aria-modal="true" aria-label="Turkuaz ayarları" aria-hidden="true">
   <aside id="set-nav-wrap">
+    <div class="set-brand">
+      <span class="set-brand-mark">T</span>
+      <span><b>Turkuaz</b><small>Kontrol merkezi</small></span>
+    </div>
     <div class="set-nav-title">AYARLAR</div>
-    <div id="set-nav"></div>
+    <div id="set-nav" role="tablist" aria-label="Ayar kategorileri"></div>
   </aside>
   <div id="set-content">
     <button id="set-close" title="Kapat (Esc)">✕</button>
@@ -226,6 +265,7 @@
 <script src="soundboard.js"></script>
 <script src="games.js"></script>
 <script src="settings.js"></script>
+<script src="updates.js"></script>
 <script type="module" src="noise.js"></script>
 </body>
 </html>

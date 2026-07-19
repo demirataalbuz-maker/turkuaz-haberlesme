@@ -12,14 +12,19 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 - **Ekran paylaşımı:** çözünürlük + FPS + ses seçeneği
 - **Tam ekran** (kamera / paylaşılan ekran / DM görüntüsü)
 - DM aramasında **AGC** düzeltmesi
-- **Windows otomatik güncelleme** düzeltmesi
+- **Windows + Linux otomatik güncelleme** (ilerleme, bildirim, yeniden başlatıp kurma, güvenli release kapısı)
 - Kopyalama butonu, WebRTC glare, çoklu STUN + TURN
+- **RNNoise güçlü gürültü engelleme** + hazır değilse standart korumaya görünür düşüş
+- **Kalıcı ses dock'u**, canlı gecikme/kayıp kalitesi, kopunca ICE yenileme
+- **Global Ctrl+Shift+M** sustur/aç + PTT odak kaybında güvenli mikrofon kapatma
+- **Ses paneli** (8 hazır efekt) + tüm uygulama seslerinde seçilen çıkış cihazı
+- **5+1 kabul testi** (15/15 WebRTC ses bağı) ve **10 kişi stres testi** (45/45)
 
 ## 🔜 Kesin yapılacak (öncelik sırası)
-1. ◐ **Bas-konuş (PTT)** — uygulama-içi çalışıyor (0.3.10); global/arka-plan sürüm Electron globalShortcut+IPC ile sırada
+1. ◐ **Bas-konuş (PTT)** — uygulama-içi çalışıyor ve odak kaybında güvenli kapanıyor; gerçek global basılı-tut PTT için keydown/keyup destekli native klavye kancası kalan (global sustur/aç hazır)
 2. ✅ **Giriş hassasiyeti (VAD)** — ses etkinliği modu + hassasiyet (0.3.10)
 3. ◐ **Ekran seçici** — çoklu ekranda seçici modal (0.3.11, Electron preload/IPC altyapısı kuruldu); pencere-paylaşımı + çoklu-monitör arayüzü gerçek makinede doğrulanacak
-4. **ML gürültü engelleme** — Krisp muadili (bkz. aşağıdaki bölüm)
+4. ◐ **ML gürültü engelleme** — RNNoise entegre; kontrollü kalite/CPU benchmark'ı ve gerekirse DeepFilterNet değerlendirmesi kalan
 5. **Mesaj tarafı:**
    - ✅ Markdown + kod bloğu + spoiler + otomatik link (0.3.6)
    - ✅ @bahsetme vurgusu (0.3.6)
@@ -37,7 +42,7 @@ Durum: ✅ bitti · 🔜 kesin yapılacak · 🧪 büyük/sonra · 🚫 yapılma
 ## 🧪 Büyük / sonra karar
 - Konular (threads)
 - Roller & izinler (tam sistem)
-- Soundboard
+- Kullanıcının kendi dosyasını ekleyebildiği özel soundboard (hazır efekt paneli tamam)
 - Arka plan bulanıklaştırma (kamera)
 
 ## 🚫 Yapılmayacak (kapsam dışı)

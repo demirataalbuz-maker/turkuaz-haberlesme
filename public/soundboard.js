@@ -4,7 +4,42 @@
 /* global state, send, Voice, CallMgr, TurkuazSettings */
 (function () {
   let ctx = null
-  const C = () => (ctx = ctx || new (window.AudioContext || window.webkitAudioContext)())
+  let desiredSink = null
+  let appliedSink = null
+  let sinkTask = Promise.resolve(true)
+
+  function selectedSink () {
+    if (desiredSink !== null) return desiredSink
+    try { return String(TurkuazSettings.get().spkId || '') } catch { return '' }
+  }
+
+  function C () {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)()
+    return ctx
+  }
+
+  // AudioContext.setSinkId Chromium/Electron'da varsa soundboard da ayarlarda
+  // seçilen hoparlöre gider. Çağrıları sıraya koymak hızlı cihaz değişimlerinde
+  // eski bir promise'in yeni seçimi ezmesini önler.
+  function applySink (c, id) {
+    desiredSink = String(id || '')
+    const target = desiredSink
+    if (!c || typeof c.setSinkId !== 'function') return Promise.resolve(false)
+    if (appliedSink === target) return sinkTask
+    sinkTask = sinkTask.catch(() => false).then(async () => {
+      await c.setSinkId(target)
+      if (desiredSink === target) appliedSink = target
+      return true
+    }).catch(() => false)
+    return sinkTask
+  }
+
+  async function readyContext () {
+    const c = C()
+    await applySink(c, selectedSink())
+    try { await c.resume() } catch {}
+    return c
+  }
   const vol = () => { try { return Math.min(1, (Number(TurkuazSettings.get().outVol) || 100) / 100) } catch { return 1 } }
 
   function master (c) {
@@ -86,10 +121,15 @@
     sounds: SOUNDS,
     play (id) {
       const s = SOUNDS.find(x => x.id === id)
-      if (!s) return
-      const c = C()
-      try { c.resume() } catch {}
-      s.fn(c, master(c), c.currentTime + 0.02)
+      if (!s) return Promise.resolve(false)
+      return readyContext().then(c => {
+        s.fn(c, master(c), c.currentTime + 0.02)
+        return true
+      }).catch(() => false)
+    },
+    setSink (id) {
+      desiredSink = String(id || '')
+      return ctx ? applySink(ctx, desiredSink) : Promise.resolve(true)
     },
     _last: 0,
     remote (id) { // uzaktan gelen — basit sel önlemi
