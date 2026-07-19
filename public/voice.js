@@ -27,19 +27,39 @@ function micConstraints (forceStandard = false) {
 }
 function camConstraints () {
   const s = _settings()
-  const video = { width: { ideal: 640 }, height: { ideal: 480 } }
+  const h = { 480: 480, 720: 720, 1080: 1080 }[s.camRes] || 480
+  // 480p kameralar 4:3, HD kameralar 16:9 çeker
+  const video = { width: { ideal: h === 480 ? 640 : Math.round(h * 16 / 9) }, height: { ideal: h } }
   if (s.camId) video.deviceId = { exact: s.camId }
   return { video }
 }
 function screenConstraints () {
   const s = _settings()
   const video = { frameRate: Number(s.screenFps) || 15 }
-  if (s.screenRes && s.screenRes !== 'source') video.height = { ideal: s.screenRes === '1080' ? 1080 : 720 }
+  const res = { 720: 720, 1080: 1080, 1440: 1440, 2160: 2160 }[s.screenRes]
+  if (res) video.height = { ideal: res } // 'source' → sınırsız (kaynak çözünürlüğü)
   return { video, audio: !!s.screenAudio }
+}
+// Ekran paylaşımı bitrate hedefi: çözünürlük + FPS ayarına göre. Mesh'te bu
+// değer HER katılımcıya ayrı gönderilir; sınır yoksa yüksek çözünürlük
+// upload'u doldurup herkesin sesini bozar.
+function videoBitrate (isScreen) {
+  const s = _settings()
+  if (!isScreen) return { 480: 800000, 720: 1500000, 1080: 2500000 }[s.camRes] || 800000
+  const base = { 720: 2500000, 1080: 5000000, 1440: 8000000, 2160: 14000000, source: 8000000 }[s.screenRes || '720'] || 2500000
+  const fps = Number(s.screenFps) || 15
+  return Math.round(base * (fps >= 60 ? 1.4 : fps >= 30 ? 1 : 0.7))
 }
 // Ekran akışı: birden çok ekran varsa kendi seçicimizi göster (Electron preload),
 // yoksa/tek ekransa getDisplayMedia'ya düş (tarayıcı + tek ekran için güvenli).
 async function getScreenStream () {
+  const stream = await getScreenStreamRaw()
+  // Ekran içeriği çoğunlukla metin/arayüz: encoder netliği korusun,
+  // bant genişliği daralınca çözünürlük yerine FPS'ten fedakârlık etsin.
+  for (const t of stream.getVideoTracks()) { try { t.contentHint = 'detail' } catch {} }
+  return stream
+}
+async function getScreenStreamRaw () {
   const c = screenConstraints()
   if (window.turkuazDesktop && window.turkuazDesktop.getSources) {
     let sources = []
@@ -111,11 +131,25 @@ function pickScreen (sources) {
     setTimeout(() => grid.querySelector('.screen-opt')?.focus(), 0)
   })
 }
+// RNNoise'un AudioWorklet modülünü bu context'e bir kez yükle.
+// Worklet ayrı gerçek-zamanlı ses thread'inde çalışır: arayüz/oyun ana
+// thread'i meşgul edince ScriptProcessor'daki gibi çıtırdamaz.
+async function ensureRnnWorklet (ctx) {
+  if (ctx._rnnWorklet === undefined) {
+    try { await ctx.audioWorklet.addModule('rnnoise-worklet.js'); ctx._rnnWorklet = true } catch { ctx._rnnWorklet = false }
+  }
+  return ctx._rnnWorklet
+}
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
   const wantsStrong = _settings().noise === 'strong'
-  const rnnoiseReady = !!(window.RNNoise && window.RNNoise.ready)
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise 48 kHz ister
+  try { obj.ctx.resume() } catch {}
+  // Tercih sırası: AudioWorklet → ScriptProcessor (noise.js) → tarayıcı NS
+  const workletOk = wantsStrong && await ensureRnnWorklet(obj.ctx)
+  const rnnoiseReady = workletOk || !!(window.RNNoise && window.RNNoise.ready)
   let constraints = micConstraints(wantsStrong && !rnnoiseReady)
   let raw
   try {
@@ -130,19 +164,24 @@ async function buildMic (obj) {
     if (window.toast) toast('Seçili mikrofon bulunamadı; varsayılan mikrofon kullanılıyor.', 'warn', 5000)
   }
   obj.micRaw = raw
-  const Ctx = window.AudioContext || window.webkitAudioContext
-  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise 48 kHz ister
-  try { obj.ctx.resume() } catch {}
   const src = obj.ctx.createMediaStreamSource(raw)
   obj.inGain = obj.ctx.createGain()
   obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
   const dest = obj.ctx.createMediaStreamDestination()
-  // AI gürültü engelleme (RNNoise): 'strong' modda ve motor hazırsa zincire gir
+  // AI gürültü engelleme (RNNoise): 'strong' modda zincire gir
   let head = src
-  if (wantsStrong && rnnoiseReady) {
+  if (wantsStrong && workletOk) {
+    try {
+      const dn = new AudioWorkletNode(obj.ctx, 'rnnoise', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+      dn._rnnoiseCleanup = () => { try { dn.port.postMessage('destroy') } catch {} }
+      src.connect(dn); head = dn; obj._denoise = dn
+    } catch {}
+  }
+  if (head === src && wantsStrong && window.RNNoise && window.RNNoise.ready) {
     const dn = window.RNNoise.makeDenoiseNode(obj.ctx)
     if (dn) { src.connect(dn); head = dn; obj._denoise = dn }
-  } else if (wantsStrong && window.toast) {
+  }
+  if (head === src && wantsStrong && window.toast) {
     toast('AI gürültü engelleme henüz hazır değil; bu katılımda standart koruma kullanılıyor.', 'warn', 5000)
   }
   head.connect(obj.inGain); obj.inGain.connect(dest)
@@ -164,6 +203,42 @@ function tuneAudioSender (sender) {
     p.encodings[0].maxBitrate = 64000
     sender.setParameters(p).catch(() => {})
   } catch {}
+}
+
+// Video göndericileri (kamera/ekran) için üst sınır: ses göndericisindeki
+// 64k sınırının video karşılığı. scale, ağ kötüleşince kademeli kısmak için.
+function tuneVideoSender (sender, isScreen, scale = 1) {
+  if (!sender || !sender.getParameters || !sender.setParameters) return
+  try {
+    const p = sender.getParameters()
+    if (!p.encodings || !p.encodings.length) p.encodings = [{}]
+    p.encodings[0].maxBitrate = Math.max(150000, Math.round(videoBitrate(isScreen) * scale))
+    // Ekranda çözünürlüğü koru (metin okunsun), kamerada dengeli davran
+    p.degradationPreference = isScreen ? 'maintain-resolution' : 'balanced'
+    sender.setParameters(p).catch(() => {})
+  } catch {}
+}
+
+// Video codec tercihi: 'h264' çoğu ekran kartında DONANIMLA kodlanır → oyun
+// oynarken ekran paylaşımı işlemciyi yemez. 'av1' aynı bitrate'te en net
+// görüntü ama yazılım kodlar (güçlü PC ister). 'auto' = tarayıcı varsayılanı.
+// addTrack'ten hemen sonra, teklif (offer) oluşmadan çağrılmalı.
+function preferVideoCodec (pc) {
+  const want = _settings().vidCodec
+  if (!want || want === 'auto') return
+  if (!window.RTCRtpTransceiver || !RTCRtpTransceiver.prototype.setCodecPreferences) return
+  let caps
+  try { caps = RTCRtpSender.getCapabilities('video') } catch { return }
+  if (!caps || !caps.codecs || !caps.codecs.length) return
+  const mime = ('video/' + want).toLowerCase()
+  const preferred = caps.codecs.filter(c => c.mimeType.toLowerCase() === mime)
+  if (!preferred.length) return // bu codec yoksa varsayılanda kal
+  const rest = caps.codecs.filter(c => c.mimeType.toLowerCase() !== mime)
+  for (const t of pc.getTransceivers()) {
+    if (t.sender && t.sender.track && t.sender.track.kind === 'video') {
+      try { t.setCodecPreferences(preferred.concat(rest)) } catch {}
+    }
+  }
 }
 
 // ============================================================
@@ -419,7 +494,10 @@ const Voice = {
       }
       const track = this.cam.getVideoTracks()[0]
       track.onended = () => { if (this.cam) this.toggleCam() }
-      for (const m of this.members.values()) m.pc.addTrack(track, this.mic)
+      for (const m of this.members.values()) {
+        tuneVideoSender(m.pc.addTrack(track, this.mic), false)
+        preferVideoCodec(m.pc)
+      }
     } else {
       this._removeVideoSenders(t => this.cam.getTracks().includes(t))
       this.cam.getTracks().forEach(t => t.stop())
@@ -441,7 +519,13 @@ const Voice = {
       const track = this.screen.getVideoTracks()[0]
       track.onended = () => { if (this.screen) this.toggleScreen() }
       // tüm parçalar (sistem sesi dahil) gitsin
-      for (const m of this.members.values()) for (const t of this.screen.getTracks()) m.pc.addTrack(t, this.screen)
+      for (const m of this.members.values()) {
+        for (const t of this.screen.getTracks()) {
+          const s = m.pc.addTrack(t, this.screen)
+          if (t.kind === 'video') tuneVideoSender(s, true)
+        }
+        preferVideoCodec(m.pc)
+      }
     } else {
       this._removeVideoSenders(t => this.screen.getTracks().includes(t))
       this.screen.getTracks().forEach(t => t.stop())
@@ -489,8 +573,14 @@ const Voice = {
       const sender = pc.addTrack(track, this.mic)
       if (track.kind === 'audio') tuneAudioSender(sender)
     }
-    if (this.cam) pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
-    if (this.screen) for (const t of this.screen.getTracks()) pc.addTrack(t, this.screen)
+    if (this.cam) tuneVideoSender(pc.addTrack(this.cam.getVideoTracks()[0], this.mic), false)
+    if (this.screen) {
+      for (const t of this.screen.getTracks()) {
+        const s = pc.addTrack(t, this.screen)
+        if (t.kind === 'video') tuneVideoSender(s, true)
+      }
+    }
+    preferVideoCodec(pc)
 
     pc.onicecandidate = (e) => this.sendRtc(m.code, { kind: 'ice', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
@@ -710,9 +800,23 @@ const Voice = {
         const bad = (m.rtt != null && m.rtt > 0.3) || (m.jitter != null && m.jitter > 0.05) || (m.loss != null && m.loss > 5)
         const warn = (m.rtt != null && m.rtt > 0.16) || (m.jitter != null && m.jitter > 0.03) || (m.loss != null && m.loss > 2)
         m.quality = bad ? 'bad' : (warn ? 'warn' : 'good')
+        // Adaptif video: ağ kötüleşince bu peer'a giden videoyu kademeli kıs
+        // (ses her zaman öncelikli), düzelince yavaşça geri aç.
+        if (m.quality === 'bad') this._scaleVideo(m, Math.max(0.25, (m._vidScale || 1) / 2))
+        else if (m.quality === 'good') this._scaleVideo(m, Math.min(1, (m._vidScale || 1) * 1.5))
       } catch {}
     }
     this.syncConnectionUI()
+  },
+
+  _scaleVideo (m, scale) {
+    if (!m.pc || scale === (m._vidScale || 1)) return
+    m._vidScale = scale
+    for (const s of m.pc.getSenders()) {
+      if (!s.track || s.track.kind !== 'video') continue
+      const isScreen = !!(this.screen && this.screen.getTracks().includes(s.track))
+      tuneVideoSender(s, isScreen, scale)
+    }
   },
 
   connectionSnapshot () {
@@ -1240,7 +1344,8 @@ const CallMgr = {
     if (!this.pc) return
     if (!this.cam) {
       try { this.cam = await navigator.mediaDevices.getUserMedia(camConstraints()) } catch { return }
-      this.pc.addTrack(this.cam.getVideoTracks()[0], this.mic)
+      tuneVideoSender(this.pc.addTrack(this.cam.getVideoTracks()[0], this.mic), false)
+      preferVideoCodec(this.pc)
     } else {
       this._dropSenders(this.cam)
       this.cam.getTracks().forEach(t => t.stop())
@@ -1254,7 +1359,11 @@ const CallMgr = {
       try { this.screen = await getScreenStream() } catch { return }
       const tr = this.screen.getVideoTracks()[0]
       tr.onended = () => { if (this.screen) this.toggleScreen() }
-      for (const t of this.screen.getTracks()) this.pc.addTrack(t, this.screen) // ses dahil
+      for (const t of this.screen.getTracks()) { // ses dahil
+        const s = this.pc.addTrack(t, this.screen)
+        if (t.kind === 'video') tuneVideoSender(s, true)
+      }
+      preferVideoCodec(this.pc)
       this.sendRtc(this.peer, { kind: 'call-state', screen: this.screen.id })
     } else {
       this._dropSenders(this.screen)
@@ -1276,6 +1385,16 @@ const CallMgr = {
   },
 
   cleanup () {
+    // Arama geçmişi: DM sohbetine yerel not düş (her iki taraf kendi kaydını tutar)
+    if (this.peer && this.state) {
+      let txt = null
+      if (this.state === 'active' && this.t0) {
+        const secs = Math.floor((Date.now() - this.t0) / 1000)
+        txt = '📞 Görüşme · ' + Math.floor(secs / 60) + ' dk ' + (secs % 60) + ' sn'
+      } else if (this.state === 'out') txt = '📞 Aradın · görüşme olmadı'
+      else if (this.state === 'in') txt = '📞 Cevapsız arama'
+      if (txt) { try { send({ t: 'call-log', code: this.peer, text: txt }) } catch {} }
+    }
     const widget = document.getElementById('call-widget')
     const restoreCallFocus = widget.contains(document.activeElement)
     this.clearIncomingNotification()

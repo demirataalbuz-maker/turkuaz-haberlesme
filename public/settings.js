@@ -4,9 +4,9 @@
 (function () {
   const KEY = 'turkuaz.settings'
   const DEFAULTS = {
-    micId: '', spkId: '', camId: '', inVol: 100, outVol: 100,
+    micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -278,19 +278,44 @@
     gCam.appendChild(row('Kamera cihazı',
       selectEl(opt(cams, 'Kamera'), settings.camId, v => { TurkuazSettings.set('camId', v) }),
       'Değişiklik kamerayı bir sonraki açışta geçerli.'))
+    gCam.appendChild(row('Kamera çözünürlüğü',
+      selectEl([
+        { value: '480', label: '480p — hafif · ~0.8 Mbps/izleyici' },
+        { value: '720', label: '720p — önerilen · ~1.5 Mbps/izleyici' },
+        { value: '1080', label: '1080p — ~2.5 Mbps/izleyici' }
+      ], settings.camRes || '720', v => TurkuazSettings.set('camRes', v)),
+      'Kameran bu çözünürlüğü desteklemiyorsa en yakınına düşer. Bir sonraki açışta geçerli.'))
     p.appendChild(gCam)
 
     // Ekran paylaşımı
     const gScr = group('EKRAN PAYLAŞIMI')
     gScr.appendChild(row('Çözünürlük',
-      selectEl([{ value: '720', label: '720p' }, { value: '1080', label: '1080p' }, { value: 'source', label: 'Kaynak (tam)' }], settings.screenRes, v => TurkuazSettings.set('screenRes', v))))
+      selectEl([
+        { value: '720', label: '720p — zayıf internet · ~2.5 Mbps/izleyici' },
+        { value: '1080', label: '1080p — önerilen · ~5 Mbps/izleyici' },
+        { value: '1440', label: '1440p (2K) — ~8 Mbps/izleyici' },
+        { value: '2160', label: '2160p (4K) — ~14 Mbps/izleyici · birebir için' },
+        { value: 'source', label: 'Kaynak (tam) — ~8 Mbps/izleyici' }
+      ], settings.screenRes, v => TurkuazSettings.set('screenRes', v)),
+      'Rakamlar izleyici BAŞINA upload: odada 4 kişi izliyorsa ×4. Hattın yetmezse Turkuaz görüntüyü kendiliğinden kısar — ses hep önceliklidir.'))
     gScr.appendChild(row('Kare hızı (FPS)',
-      selectEl([{ value: '15', label: '15 fps' }, { value: '30', label: '30 fps' }, { value: '60', label: '60 fps' }], String(settings.screenFps), v => TurkuazSettings.set('screenFps', Number(v)))))
+      selectEl([
+        { value: '15', label: '15 fps — kod/belge (en hafif)' },
+        { value: '30', label: '30 fps — video izletme' },
+        { value: '60', label: '60 fps — oyun (bant + işlemci ×1.4)' }
+      ], String(settings.screenFps), v => TurkuazSettings.set('screenFps', Number(v)))))
     const scrAudio = document.createElement('label'); scrAudio.className = 'set-switch'
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!settings.screenAudio
     cb.onchange = () => TurkuazSettings.set('screenAudio', cb.checked)
     scrAudio.append(cb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, 'Sistem sesi Windows\'ta yakalanır; Linux/mac\'te desteklenmiyorsa paylaşım sessiz devam eder.'))
+    gScr.appendChild(row('Video codec',
+      selectEl([
+        { value: 'auto', label: 'Otomatik (VP8/VP9)' },
+        { value: 'h264', label: 'H264 — GPU dostu · oyun oynarken önerilir' },
+        { value: 'av1', label: 'AV1 — en net görüntü · güçlü işlemci ister' }
+      ], settings.vidCodec || 'auto', v => TurkuazSettings.set('vidCodec', v)),
+      'Kamera ve ekran görüntüsünün sıkıştırma biçimi. H264 çoğu ekran kartında donanımla kodlanır: oyun FPS\'i düşmez. Bir sonraki katılım/aramada geçerli.'))
     p.appendChild(gScr)
   }
 

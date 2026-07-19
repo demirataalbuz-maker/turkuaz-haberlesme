@@ -46,11 +46,22 @@ const core = createCore({
 // ---- web arayüzü (sadece localhost) ----
 const app = express()
 app.use(express.static(path.join(__dirname, 'public')))
+// Karşıdan gelen dosyanın MIME'ı gönderenin beyanı — körü körüne güvenilmez.
+// Yalnız bilinen zararsız türler tarayıcıda açılır (inline); geri kalan her şey
+// (text/html, image/svg+xml dahil — ikisi de script çalıştırabilir) indirme
+// olarak iner. nosniff: tarayıcı içeriği koklayıp türü "yükseltemesin".
+const INLINE_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
+  'video/mp4', 'video/webm', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/webm',
+  'application/pdf'
+])
 app.get('/files/:fid', (req, res) => {
   const meta = core.filesIdx()[req.params.fid]
   if (!meta || !/^[0-9a-f-]{36}$/.test(req.params.fid)) return res.status(404).end()
-  res.setHeader('Content-Type', meta.mime)
-  res.setHeader('Content-Disposition', 'inline; filename="' + encodeURIComponent(meta.fname) + '"')
+  const inline = INLINE_MIME.has(String(meta.mime || ''))
+  res.setHeader('Content-Type', inline ? meta.mime : 'application/octet-stream')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Content-Disposition', (inline ? 'inline' : 'attachment') + '; filename="' + encodeURIComponent(meta.fname) + '"')
   res.sendFile(store.filePath(req.params.fid))
 })
 

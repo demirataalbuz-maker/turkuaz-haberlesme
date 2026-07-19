@@ -8,6 +8,31 @@
   let dismissed = null
   let bar = null
 
+  // "Tak diye" güncelleme: indirme bitince kullanıcı butonu beklemeden, görünür
+  // bir geri sayımla kendini kurar. Aktif arama/sesli sohbet varsa sayaç durur
+  // (aramayı kesmeyiz); ✕ ile iptal edilirse kurulum normal çıkışa kalır.
+  const AUTO_INSTALL_SECS = 15
+  let autoTimer = null
+  let autoLeft = 0
+  function busyInCall () {
+    return !!((window.Voice && window.Voice.room) || (window.CallMgr && window.CallMgr.state))
+  }
+  function cancelAuto () {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null }
+    autoLeft = 0
+  }
+  function startAuto () {
+    if (autoTimer || state.status !== 'ready') return
+    autoLeft = AUTO_INSTALL_SECS
+    autoTimer = setInterval(() => {
+      if (state.status !== 'ready') { cancelAuto(); render(); return }
+      if (busyInCall()) { render(); return } // aramadayken bekle, bitince devam
+      autoLeft--
+      if (autoLeft <= 0) { cancelAuto(); api.install().catch(() => {}); return }
+      render()
+    }, 1000)
+  }
+
   function keyOf (s) { return s.status + ':' + (s.version || '') }
   function percent (n) { return Math.max(0, Math.min(100, Math.round(Number(n) || 0))) }
   function size (n) {
@@ -25,7 +50,10 @@
         const detail = s.total ? ' · ' + size(s.transferred) + ' / ' + size(s.total) : ''
         return 'Turkuaz v' + (s.version || '?') + ' indiriliyor · %' + percent(s.percent) + detail
       }
-      case 'ready': return 'Turkuaz v' + (s.version || '?') + ' hazır — yeniden başlatınca kurulacak.'
+      case 'ready':
+        if (autoTimer && busyInCall()) return 'Turkuaz v' + (s.version || '?') + ' hazır — arama bitince kurulacak.'
+        if (autoTimer) return 'Turkuaz v' + (s.version || '?') + ' hazır — ' + autoLeft + ' sn içinde yeniden başlatılıyor…'
+        return 'Turkuaz v' + (s.version || '?') + ' hazır — yeniden başlatınca kurulacak.'
       case 'installing': return 'Güncelleme kuruluyor, Turkuaz yeniden başlatılıyor…'
       case 'up-to-date': return 'Turkuaz güncel · v' + (s.currentVersion || '?')
       case 'error': return 'Güncelleme kontrol edilemedi: ' + (s.error || 'bilinmeyen hata')
@@ -67,7 +95,12 @@
     close.className = 'update-close'
     close.title = 'Sonra'
     close.textContent = '✕'
-    close.onclick = () => { dismissed = keyOf(state); bar.classList.add('hidden') }
+    close.onclick = () => {
+      cancelAuto() // "Sonra" = geri sayımı durdur; kurulum normal çıkışta yapılır
+      dismissed = keyOf(state)
+      if (state.status !== 'ready') bar.classList.add('hidden')
+      render()
+    }
     bar.append(icon, content, action, close)
     document.body.appendChild(bar)
     return bar
@@ -111,6 +144,8 @@
     const previousKey = keyOf(state)
     state = { ...state, ...(next || {}) }
     if (keyOf(state) !== previousKey) dismissed = null
+    if (state.status === 'ready' && keyOf(state) !== previousKey) startAuto()
+    if (state.status !== 'ready') cancelAuto()
     render()
   }
 
