@@ -1,6 +1,6 @@
 {
   "name": "turkuaz",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "desktopName": "Turkuaz.desktop",
   "main": "electron-main.js",
@@ -60,8 +60,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.png",
-      "forceCodeSigning": true
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,

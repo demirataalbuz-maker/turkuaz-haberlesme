@@ -24,7 +24,8 @@ const build = pkg.build || {}
 const targets = (value) => (value && value.target) || []
 if (build.appId !== 'dev.turkuaz.app') fail('appId değişmiş; NSIS yükseltme kimliği sabit kalmalı')
 if (!targets(build.win).includes('nsis')) fail('Windows NSIS hedefi eksik')
-if (!build.win || build.win.forceCodeSigning !== true) fail('Windows release için forceCodeSigning etkin olmalı')
+// İmza sertifikamız yok — forceCodeSigning açılırsa release hiç exe üretemiyor (v0.4.4 vakası).
+if (build.win && build.win.forceCodeSigning) fail('forceCodeSigning kapalı olmalı: sertifika yok, exe imzasız dağıtılıyor (v0.4.2 gibi)')
 if (!targets(build.linux).includes('AppImage')) fail('Linux AppImage hedefi eksik')
 if (!build.publish || !build.publish.some(p => p.provider === 'github' && p.owner === 'demirataalbuz-maker' && p.repo === 'turkuaz-haberlesme')) {
   fail('GitHub update provider yapılandırması eksik veya değişmiş')

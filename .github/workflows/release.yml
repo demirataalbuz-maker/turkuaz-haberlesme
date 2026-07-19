@@ -74,36 +74,14 @@ jobs:
       - name: Bağımlılıkları kur
         run: npm ci
 
-      - name: Windows imzalama secret'larını doğrula
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
-            throw "WIN_CSC_LINK ve WIN_CSC_KEY_PASSWORD secret'ları olmadan Windows release üretilemez."
-          }
-
+      # Kod imzalama sertifikamız yok: exe v0.4.2'deki gibi imzasız çıkar
+      # (SmartScreen uyarısı normal). Sertifika alınırsa WIN_CSC_LINK secret'ı
+      # ve forceCodeSigning geri eklenebilir.
       - name: Paketi üret (henüz yayınlama)
         run: npx --no-install electron-builder ${{ matrix.args }} --publish never
-        env:
-          # Windows job'unda zorunludur; forceCodeSigning imzasız paketi reddeder.
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Update manifesti, boyut ve SHA-512 doğrula
         run: node scripts/verify-update-artifacts.js ${{ matrix.platform }}
-
-      - name: Windows Authenticode imzasını doğrula
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem dist/Turkuaz-Setup-*.exe | Select-Object -First 1
-          if (-not $installer) { throw "Windows installer bulunamadı." }
-          $signature = Get-AuthenticodeSignature $installer.FullName
-          if ($signature.Status -ne 'Valid') { throw "Geçersiz Windows imzası: $($signature.Status)" }
-          Write-Host "Windows publisher: $($signature.SignerCertificate.Subject)"
 
       - name: Linux release dosyalarını sakla
         if: matrix.platform == 'linux'

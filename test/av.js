@@ -3,7 +3,7 @@
 // Voice.join / toggleCam / toggleScreen ve DM araması sürülür; karşı tarafta
 // GERÇEKTEN video çözülüyor mu (videoWidth > 0, framesDecoded) doğrulanır.
 // Not: grafik oturum ister (pencereler kısa süreliğine açılır).
-const { spawn } = require('child_process')
+const { spawn, spawnSync } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
@@ -17,6 +17,11 @@ const CAPTURE_DIR = process.env.TURKUAZ_UI_CAPTURE_DIR || ''
 
 fs.rmSync(TMP, { recursive: true, force: true })
 fs.mkdirSync(TMP, { recursive: true })
+
+// electron paketi binary'yi artık postinstall'da değil ilk çalıştırmada indiriyor;
+// iki instance aynı anda tetikleyince indirme yarışı ETXTBSY ile öldürüyor (CI v0.4.4).
+// Binary eksikse burada tek başına indirt, sonra instance'ları başlat.
+spawnSync(path.join(ROOT, 'node_modules/.bin/electron'), ['--version'], { cwd: ROOT, stdio: 'ignore' })
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const children = []
