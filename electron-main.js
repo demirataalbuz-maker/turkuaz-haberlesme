@@ -21,6 +21,24 @@ app.commandLine.appendSwitch('disable-background-timer-throttling')
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 // Wayland'da Electron global kısayollarını masaüstü portalına kaydeder.
 if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal')
+
+// GPU süreci açılamazsa Chromium tüm uygulamayı öldürüyor:
+//   "GPU process launch failed: error_code=1002"
+//   "FATAL: GPU process isn't usable. Goodbye."
+// Linux/Wayland + bozuk DRI/sürücüde sık. Yazılım render'a düş;
+// TURKUAZ_FORCE_GPU=1 ile GPU zorlanır, TURKUAZ_DISABLE_GPU=1 ile her yerde kapanır.
+;(function configureGpu () {
+  if (process.env.TURKUAZ_FORCE_GPU === '1') return
+  const session = String(process.env.XDG_SESSION_TYPE || '').toLowerCase()
+  const wayland = session === 'wayland' || !!process.env.WAYLAND_DISPLAY
+  const disable = process.env.TURKUAZ_DISABLE_GPU === '1' ||
+    (process.platform === 'linux' && wayland)
+  if (!disable) return
+  try { app.disableHardwareAcceleration() } catch {}
+  app.commandLine.appendSwitch('disable-gpu')
+  app.commandLine.appendSwitch('disable-gpu-compositing')
+})()
+
 if (process.env.PEERCORD_FAKE_MEDIA || process.env.TURKUAZ_FAKE_MEDIA) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
