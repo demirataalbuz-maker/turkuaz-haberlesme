@@ -124,6 +124,11 @@ class Srv {
       try {
         await new Promise((res, rej) => {
           const ws = new WebSocket('ws://127.0.0.1:' + this.port)
+          // Dinleyici open'dan ÖNCE takılmalı: sunucu ilk state'i bağlanır
+          // bağlanmaz yollar; el sıkışmayla aynı TCP okumasında gelirse ws
+          // open+message'ı aynı tick'te işler ve geç takılan dinleyici ilk
+          // state'i kaçırır (CI'da nadir ama gerçek yarış — v0.6.0 failure).
+          ws.on('message', d => { try { const m = JSON.parse(d.toString()); if (m.t === 'state') this.state = m } catch {} })
           ws.on('open', () => { this.ws = ws; res() })
           ws.on('error', rej)
         })
@@ -131,7 +136,8 @@ class Srv {
       } catch { await sleep(400) }
     }
     if (!this.ws) fail(this.label + ' web arayüzüne bağlanılamadı')
-    this.ws.on('message', d => { const m = JSON.parse(d.toString()); if (m.t === 'state') this.state = m })
+    // Emniyet kemeri: ilk state yine de kaçtıysa çekirdekten tazesini iste
+    this.send({ t: '__ready' })
   }
   send (o) { this.ws.send(JSON.stringify(o)) }
   async waitState (desc, pred, timeoutMs = 40000) {

@@ -54,19 +54,12 @@ class Client {
   }
 
   async connect () {
-    for (let i = 0; i < 40; i++) {
-      try {
-        await new Promise((resolve, reject) => {
-          const ws = new WebSocket('ws://127.0.0.1:' + this.port)
-          ws.on('open', () => { this.ws = ws; resolve() })
-          ws.on('error', reject)
-        })
-        break
-      } catch { await sleep(250) }
-    }
-    if (!this.ws) fail(this.label + ' web arayüzüne bağlanılamadı')
-    this.ws.on('message', (d) => {
-      const m = JSON.parse(d.toString())
+    // Dinleyici open'dan ÖNCE takılır: sunucunun bağlantı anında yolladığı ilk
+    // state, el sıkışmayla aynı TCP okumasında gelirse open+message aynı tick'te
+    // işlenir ve geç takılan dinleyici onu kaçırır (av.js'teki yarışın aynısı).
+    const onMessage = (d) => {
+      let m
+      try { m = JSON.parse(d.toString()) } catch { return }
       this.events.push(m)
       if (m.t === 'state') this.state = m
       if (m.t === 'msg') this.msgs.push(m)
@@ -76,7 +69,21 @@ class Client {
           w.resolve()
         }
       }
-    })
+    }
+    for (let i = 0; i < 40; i++) {
+      try {
+        await new Promise((resolve, reject) => {
+          const ws = new WebSocket('ws://127.0.0.1:' + this.port)
+          ws.on('message', onMessage)
+          ws.on('open', () => { this.ws = ws; resolve() })
+          ws.on('error', reject)
+        })
+        break
+      } catch { await sleep(250) }
+    }
+    if (!this.ws) fail(this.label + ' web arayüzüne bağlanılamadı')
+    // Emniyet: ilk state yine de kaçtıysa çekirdekten tazesini iste
+    try { this.ws.send(JSON.stringify({ t: '__ready' })) } catch {}
   }
 
   send (obj) { this.ws.send(JSON.stringify(obj)) }
