@@ -699,10 +699,8 @@ const Voice = {
       m.analyser.fftSize = 256
       m.gain = this.ctx.createGain()
       m.gain.gain.value = this.memberVol(m.code) // kişi-bazlı ses
-      m.srcNode.connect(m.analyser)
-      m.srcNode.connect(m.panner)
-      m.panner.connect(m.gain)
       m.gain.connect(this.master)
+      this.routeMember(m) // konumsal (panner) ya da düz (panner bypass) — moda göre
       this.updatePanner(m)
     }
     m.video = !!(main && main.getVideoTracks().some(t => t.readyState === 'live'))
@@ -732,6 +730,43 @@ const Voice = {
     m.panner.positionZ.setTargetAtTime((m.pos.y - this.myPos.y) / LR_SCALE, t, 0.05)
   },
   updateAllPanners () { for (const m of this.members.values()) this.updatePanner(m) },
+
+  // ---- sesli sohbet modu: 'spatial' (oturma odası, HRTF) | 'flat' (düz, eşit seviye) ----
+  flat () { return (_settings().voiceMode || 'spatial') === 'flat' },
+  // Bir üyenin ses grafiğini moda göre bağla. Konuşma göstergesi (analyser)
+  // her modda takılı; fark panner'da: düz modda bypass → yön/mesafe yok.
+  routeMember (m) {
+    if (!m.srcNode || !m.gain || !m.analyser) return
+    try { m.srcNode.disconnect() } catch {}
+    try { m.panner.disconnect() } catch {}
+    m.srcNode.connect(m.analyser)
+    if (this.flat()) {
+      m.srcNode.connect(m.gain) // düz: herkes eşit seviye, konum sesi etkilemez
+    } else {
+      m.srcNode.connect(m.panner); m.panner.connect(m.gain)
+    }
+  },
+  setVoiceMode (mode) {
+    mode = mode === 'flat' ? 'flat' : 'spatial'
+    if (window.TurkuazSettings) TurkuazSettings.set('voiceMode', mode)
+    for (const m of this.members.values()) this.routeMember(m)
+    this.sync() // ipucu + sürükle davranışı + düz-mod ızgarası güncellensin
+  },
+  // Düz modda balonları düzenli ortalı ızgaraya diz (konum sesi etkilemediği için)
+  arrangeFlatGrid () {
+    const bubbles = []
+    if (this._myBubble) bubbles.push(this._myBubble)
+    for (const m of this.members.values()) if (m.bubble && m.bubble.isConnected) bubbles.push(m.bubble)
+    const n = bubbles.length
+    if (!n) return
+    const cols = Math.min(n, Math.max(1, Math.round(Math.sqrt(n * 1.7))))
+    const rows = Math.ceil(n / cols)
+    bubbles.forEach((b, i) => {
+      const col = i % cols; const row = Math.floor(i / cols)
+      b.style.left = (((col + 0.5) / cols) * 100).toFixed(1) + '%'
+      b.style.top = (26 + ((row + 0.5) / rows) * 52).toFixed(1) + '%'
+    })
+  },
 
   // ---- balon çarpışması: üst üste binme yok, değince "toink" ----
   _toinkLast: null,
@@ -983,6 +1018,7 @@ const Voice = {
       if (!m) return
       m.pos = this.clampPos({ x: Number(ev.x) || 0, y: Number(ev.y) || 0 })
       this.updatePanner(m)
+      if (this.flat()) { this.arrangeFlatGrid(); return } // düz modda ızgara sabit
       this.positionBubble(m)
       this.avoidOverlap() // üstüme geldiyse kenara kay (toink)
     }
@@ -1032,6 +1068,22 @@ const Voice = {
 
     this.renderMyBubble()
     for (const m of this.members.values()) this.updateBubble(m)
+
+    // mod: düz → balonları ızgaraya diz + ipucunu değiştir; konumsal → sürükle
+    const flat = this.flat()
+    const stage = this.el('lr-stage')
+    if (stage) stage.classList.toggle('flat', flat)
+    if (flat) this.arrangeFlatGrid()
+    const hint = document.querySelector('#lr-controls .lr-hint')
+    if (hint) hint.textContent = flat
+      ? 'Düz mod — herkes eşit seviyede'
+      : 'Balonunu sürükle — sesler bulunduğun yönden gelir'
+    const mb = this.el('btn-voicemode')
+    if (mb) {
+      mb.textContent = flat ? '🎧 Konumsal' : '💬 Düz mod'
+      mb.title = flat ? 'Konumsal (oturma odası) moduna geç' : 'Düz konuşma moduna geç'
+      mb.setAttribute('aria-label', mb.title)
+    }
   },
 
   syncTheater (inRoomView) {
@@ -1115,6 +1167,7 @@ const Voice = {
 
   makeDraggable (b) {
     b.addEventListener('pointerdown', (e) => {
+      if (this.flat()) return // düz modda konum sesi etkilemez → sürükleme kapalı
       e.preventDefault()
       b.setPointerCapture(e.pointerId)
       const stage = this.el('lr-stage')
@@ -1512,6 +1565,7 @@ document.addEventListener('DOMContentLoaded', () => {
   Voice.el('btn-mic').onclick = () => Voice.toggleMute()
   Voice.el('btn-cam').onclick = () => Voice.toggleCam()
   Voice.el('btn-screen').onclick = () => Voice.toggleScreen()
+  Voice.el('btn-voicemode').onclick = () => Voice.setVoiceMode(Voice.flat() ? 'spatial' : 'flat')
   Voice.el('voice-dock-return').onclick = () => {
     const room = state.rooms.find(r => r.topic === Voice.room)
     if (room && typeof openRoom === 'function') openRoom(room)

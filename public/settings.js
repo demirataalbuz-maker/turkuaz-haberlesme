@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    vidCodec: 'auto', theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'spatial', theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -219,6 +219,19 @@
     sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. İki AI motoru da pakete dahil, indirme yok: <b>RNNoise</b> (hafif, sabit uğultuda iyi) ve <b>DeepFilterNet3</b> (16 MB, klavye/ani seslerde belirgin üstün). DeepFilterNet açılamazsa otomatik RNNoise'a düşülür.`
     gNoise.appendChild(sys)
     p.appendChild(gNoise)
+
+    // Sesli sohbet modu (konumsal oturma odası / düz konuşma)
+    const gVoice = group('SESLİ SOHBET MODU')
+    gVoice.appendChild(row('Mod',
+      selectEl([
+        { value: 'spatial', label: 'Konumsal — oturma odası (HRTF)' },
+        { value: 'flat', label: 'Düz konuşma — herkes eşit' }
+      ], settings.voiceMode || 'spatial', v => {
+        TurkuazSettings.set('voiceMode', v)
+        if (window.Voice && Voice.room) Voice.setVoiceMode(v) // odadaysan anında geç
+      }),
+      'Konumsal: balonunu sürükle, sesler yönünden gelir (kulaklık önerilir). Düz: normal grup araması, herkes eşit seviyede. Anında geçerli.'))
+    p.appendChild(gVoice)
 
     // Konuşma modu (açık / ses etkinliği / bas-konuş)
     const gSpeak = group('KONUŞMA MODU')
