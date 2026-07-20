@@ -531,18 +531,22 @@ const Voice = {
   setMemberVolume (code, pct) {
     this.userVols()[code] = Number(pct)
     try { localStorage.setItem('turkuaz.uservol', JSON.stringify(this._userVols)) } catch {}
-    this.applyGains()
+    const m = this.members.get(code)
+    if (m && m.gain) m.gain.gain.value = Math.max(0, Number(pct) || 0) / 100 // senkron: UI/test anında okur
   },
 
   // ---- konuşana odak: bir kişiye tıkla → onu yükselt, ötekileri kıs ----
   _focusCode: null,
+  // Odak + bölge modülasyonu SADECE spatialGain'e uygulanır; kişi-bazlı ses
+  // (m.gain) ayrı ve dokunulmaz — böylece ses ayarı = base × (odak×bölge).
   applyGains () {
     for (const m of this.members.values()) {
-      if (!m.gain) continue
-      const base = this.memberVol(m.code)
-      const f = this._focusCode ? (m.code === this._focusCode ? 1.35 : 0.18) : 1
-      const z = this.zoneFactor(m) // aynı bölge net, farklı bölge boğuk
-      m.gain.gain.setTargetAtTime(base * f * z, this.ctx ? this.ctx.currentTime : 0, 0.08)
+      if (!m.spatialGain) continue
+      const focused = this._focusCode === m.code
+      const f = this._focusCode ? (focused ? 1.35 : 0.18) : 1
+      // odaktakini net duymak istiyorsun → farklı bölgede olsa bile bölge cezası yok
+      const z = focused ? 1 : this.zoneFactor(m)
+      m.spatialGain.gain.setTargetAtTime(f * z, this.ctx ? this.ctx.currentTime : 0, 0.08)
     }
   },
   toggleFocus (code) {
@@ -746,11 +750,13 @@ const Voice = {
       m.analyser = this.ctx.createAnalyser()
       m.analyser.fftSize = 256
       m.gain = this.ctx.createGain()
-      m.gain.gain.value = this.memberVol(m.code) // kişi-bazlı ses
+      m.gain.gain.value = this.memberVol(m.code) // KİŞİ-BAZLI ses (senkron; ayar UI'ı + test bunu okur)
       m.gain.connect(this.master)
+      m.spatialGain = this.ctx.createGain() // ODAK + BÖLGE modülasyonu (ayrı; yumuşak rampa)
+      m.spatialGain.connect(m.gain)
       this.routeMember(m) // konumsal (panner) ya da düz (panner bypass) — moda göre
       this.updatePanner(m)
-      this.applyGains() // odak aktifse yeni üye de doğru seviyeye otursun
+      this.applyGains() // odak/bölge aktifse yeni üye de doğru seviyeye otursun
     }
     m.video = !!(main && main.getVideoTracks().some(t => t.readyState === 'live'))
     this.updateBubble(m)
@@ -764,6 +770,7 @@ const Voice = {
     try { m.pc.close() } catch {}
     try { m.srcNode && m.srcNode.disconnect() } catch {}
     try { m.panner && m.panner.disconnect() } catch {}
+    try { m.spatialGain && m.spatialGain.disconnect() } catch {}
     try { m.gain && m.gain.disconnect() } catch {}
     if (m.audioEl) { m.audioEl.srcObject = null; m.audioEl = null }
     if (m.bubble) m.bubble.remove()
@@ -864,14 +871,15 @@ const Voice = {
   // Bir üyenin ses grafiğini moda göre bağla. Konuşma göstergesi (analyser)
   // her modda takılı; fark panner'da: düz modda bypass → yön/mesafe yok.
   routeMember (m) {
-    if (!m.srcNode || !m.gain || !m.analyser) return
+    if (!m.srcNode || !m.gain || !m.analyser || !m.spatialGain) return
     try { m.srcNode.disconnect() } catch {}
     try { m.panner.disconnect() } catch {}
     m.srcNode.connect(m.analyser)
+    // src/panner → spatialGain (odak+bölge) → gain (kullanıcı sesi) → master
     if (this.flat()) {
-      m.srcNode.connect(m.gain) // düz: herkes eşit seviye, konum sesi etkilemez
+      m.srcNode.connect(m.spatialGain) // düz: herkes eşit seviye, konum sesi etkilemez
     } else {
-      m.srcNode.connect(m.panner); m.panner.connect(m.gain)
+      m.srcNode.connect(m.panner); m.panner.connect(m.spatialGain)
     }
   },
   setVoiceMode (mode) {
