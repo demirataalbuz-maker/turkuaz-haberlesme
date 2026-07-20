@@ -102,6 +102,34 @@ async function main () {
   core.p2p.emit('message', member.hex, { t: 'room', room: topic, id: 'live1', name: 'peer', text: 'canlı', ts: Date.now() })
   assert.ok(store.loadFolded('room-' + topic).some(m => m.id === 'live1'), 'canlı oda mesajı işlenmeli')
 
+  // ---- link önizleme: geçerli kart kalır, dev görsel ve kötü url düşer ----
+  core.p2p.emit('message', friend.hex, {
+    t: 'dm',
+    id: 'p1',
+    text: 'şuna bak https://ornek.dev/yazi',
+    ts: Date.now(),
+    prev: { url: 'https://ornek.dev/yazi', title: 'Başlık', desc: 'Açıklama', site: 'ornek.dev', img: 'data:image/jpeg;base64,' + 'A'.repeat(200000) }
+  })
+  const p1 = store.loadFolded('dm-' + friend.hex).find(m => m.id === 'p1')
+  assert.ok(p1 && p1.prev && p1.prev.title === 'Başlık', 'geçerli önizleme kaydedilmeli')
+  assert.ok(!p1.prev.img, '80 KB üstü önizleme görseli düşmeli')
+  core.p2p.emit('message', friend.hex, {
+    t: 'dm', id: 'p2', text: 'x', ts: Date.now(), prev: { url: 'javascript:alert(1)', title: 'zararlı' }
+  })
+  const p2 = store.loadFolded('dm-' + friend.hex).find(m => m.id === 'p2')
+  assert.ok(p2 && !p2.prev, 'http(s) olmayan önizleme url\'i reddedilmeli')
+
+  // ---- iletme (forward): DM'deki mesaj odaya imzalı + fw etiketli gider ----
+  core.handleUI({ t: 'forward', room: topic, ch: 'genel', conv: 'dm-' + friend.hex, msgId: 'm1' })
+  const fwd = store.loadMessages('room-' + topic, Infinity).find(l => l.fw && l.text === 'selam')
+  assert.ok(fwd, 'iletilen mesaj oda geçmişine yazılmalı')
+  assert.equal(fwd.fw.name, 'anon', 'iletilen mesaj kaynak yazarın adını taşımalı')
+  assert.ok(/^[0-9a-f]{128}$/.test(fwd.sig), 'iletilen oda mesajı imzalı olmalı')
+  const goodParts = ['msg', topic, fwd.id, 'genel', String(fwd.ts), fwd.name || 'anon', fwd.text]
+  assert.ok(hcrypto.verify(Buffer.from(goodParts.join('\n')), Buffer.from(fwd.sig, 'hex'), core.p2p.keyPair.publicKey), 'iletilen mesajın imzası kendi anahtarımızla doğrulanmalı')
+  core.handleUI({ t: 'forward', room: topic, ch: 'genel', conv: 'dm-' + friend.hex, msgId: 'yok-boyle-mesaj' })
+  // sessizce yok sayılır — çökmemesi yeter
+
   // ---- fchunk: saçma parça sayısı transferi başlatamaz ----
   core.p2p.emit('message', member.hex, { t: 'fchunk', fid: 'f'.repeat(36), i: 0, n: 999999, data: 'aGk=' })
   core.p2p.emit('message', member.hex, { t: 'file-fin', fid: 'f'.repeat(36), fname: 'x', mime: 'text/plain' })

@@ -5,12 +5,15 @@ let activeConv = null            // { type:'dm', code } | { type:'room', topic }
 let replyTarget = null           // yanıtlanan mesaj { id, name, text }
 const activeChs = {}             // topic -> kanal adı
 const histories = {}             // conv -> [msg] (katlanmış)
-const unread = (() => {          // key -> sayı (dm: conv, oda: conv#ch)
+const loadLSMap = (key) => {
   try {
-    const value = JSON.parse(localStorage.getItem('turkuaz.unread') || '{}')
+    const value = JSON.parse(localStorage.getItem(key) || '{}')
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   } catch { return {} }
-})()
+}
+const unread = loadLSMap('turkuaz.unread')               // key -> sayı (dm: conv, oda: conv#ch)
+const unreadMention = loadLSMap('turkuaz.unreadMention') // key -> beni anan mesaj sayısı (oda)
+let unreadMarker = null          // { key, count, id? } — sohbet açılınca "YENİ" ayracının yeri
 const typing = {}                // key -> { name, until }
 
 const $ = (id) => document.getElementById(id)
@@ -98,7 +101,10 @@ Transport.onStatus(({ status }) => {
 })
 
 function persistUnread () {
-  try { localStorage.setItem('turkuaz.unread', JSON.stringify(unread)) } catch {}
+  try {
+    localStorage.setItem('turkuaz.unread', JSON.stringify(unread))
+    localStorage.setItem('turkuaz.unreadMention', JSON.stringify(unreadMention))
+  } catch {}
 }
 function syncUnreadUI () {
   const total = Object.values(unread).reduce((sum, value) => sum + (Number(value) || 0), 0)
@@ -106,8 +112,14 @@ function syncUnreadUI () {
 }
 function markRead (key) {
   if (unread[key]) delete unread[key]
+  if (unreadMention[key]) delete unreadMention[key]
   persistUnread()
   syncUnreadUI()
+}
+// Sohbet açılırken okunmamış sayısını yakala: renderMessages "YENİ" ayracını
+// buna göre çizer (ilk çizimde mesaj id'sine sabitlenir ki kaymasın).
+function captureUnreadMarker (key) {
+  unreadMarker = unread[key] ? { key, count: unread[key] } : null
 }
 function markActiveRead () {
   if (!activeConv || document.visibilityState !== 'visible' || !document.hasFocus()) return
@@ -163,6 +175,7 @@ function onIncomingMsg (m) {
   else if (!mine) {
     const k = unreadKey(m.conv, m.msg.ch)
     unread[k] = (unread[k] || 0) + 1
+    if (m.conv.startsWith('room-') && mentionsMe(m.msg.text)) unreadMention[k] = (unreadMention[k] || 0) + 1
     persistUnread()
     syncUnreadUI()
     render()
@@ -238,7 +251,10 @@ function colorOf (code) {
   return COLORS[h % COLORS.length]
 }
 function initialOf (name, code) { return (name || code || '?').trim()[0].toUpperCase() }
-function esc (s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML }
+// textContent→innerHTML yalnız <>& kaçırır; esc çıktısı ÖZNİTELİK bağlamında da
+// (href="...", title="...") kullanıldığından tırnakları da kaçır — yoksa
+// url/başlık içine sıkışan " ile onmouseover=... enjekte edilebilir (XSS).
+function esc (s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;') }
 function fmtTime (ts) { return new Date(ts).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) }
 function fmtDay (ts) { return new Date(ts).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) }
 function fmtSize (b) { return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB' }
@@ -268,11 +284,74 @@ function fmt (raw) {
   return s
 }
 
+// ---- link önizleme (gönderen üretir; alıcının IP'si siteye hiç gitmez) ----
+// Yazarken URL görülünce arka planda /preview'dan ısıtılır; Enter'da hazırsa
+// karta dönüşüp mesajla gider. Görsel canvas'ta küçültülür (JPEG ≤80 KB).
+const PREV_IMG_RE = /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/
+const prevDone = new Map() // url -> kart | null
+const prevWait = new Map() // url -> Promise
+function firstUrl (text) {
+  const m = String(text || '').match(/https?:\/\/[^\s<]+/)
+  return m ? m[0] : null
+}
+function shrinkPreviewImage (dataUri) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, 420 / (img.width || 1))
+      const cv = document.createElement('canvas')
+      cv.width = Math.max(1, Math.round(img.width * scale))
+      cv.height = Math.max(1, Math.round(img.height * scale))
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height)
+      let out = ''
+      try { out = cv.toDataURL('image/jpeg', 0.72) } catch {}
+      resolve(out && out.length <= 80000 ? out : '')
+    }
+    img.onerror = () => resolve('')
+    img.src = dataUri
+  })
+}
+function fetchPreview (url) {
+  if (window.TurkuazNative) return Promise.resolve(null) // mobil: HTTP ucu yok
+  if (prevDone.has(url)) return Promise.resolve(prevDone.get(url))
+  if (prevWait.has(url)) return prevWait.get(url)
+  const p = (async () => {
+    try {
+      const r = await fetch('/preview?url=' + encodeURIComponent(url))
+      const j = await r.json()
+      if (!j || !j.ok) return null
+      const prev = { url, title: j.title || '', desc: j.desc || '', site: j.site || '' }
+      if (j.img) {
+        const small = await shrinkPreviewImage(j.img)
+        if (small) prev.img = small
+      }
+      return (prev.title || prev.desc) ? prev : null
+    } catch { return null }
+  })().then(v => {
+    if (prevDone.size > 300) prevDone.clear()
+    prevDone.set(url, v)
+    prevWait.delete(url)
+    return v
+  })
+  prevWait.set(url, p)
+  return p
+}
+function prevHTML (p) {
+  if (!p || !/^https?:\/\//i.test(p.url || '')) return ''
+  const img = typeof p.img === 'string' && PREV_IMG_RE.test(p.img) ? p.img : ''
+  return `<a class="msg-preview" href="${esc(p.url)}" target="_blank" rel="noreferrer noopener">
+    ${p.site ? `<span class="mp-site">${esc(p.site)}</span>` : ''}
+    ${p.title ? `<span class="mp-title">${esc(p.title)}</span>` : ''}
+    ${p.desc ? `<span class="mp-desc">${esc(p.desc)}</span>` : ''}
+    ${img ? `<img class="mp-img" src="${img}" alt="" loading="lazy">` : ''}
+  </a>`
+}
+
 function avatarHTML (avatar, name, code, dot) {
   const cls = avatar ? 'avatar emoji' : 'avatar'
   const bg = avatar ? '' : `background:${colorOf(code)}`
   const inner = avatar || initialOf(name, code)
-  return `<div class="${cls}" style="${bg}">${inner}${dot !== undefined ? `<div class="dot ${dot ? 'on' : ''}"></div>` : ''}</div>`
+  return `<div class="${cls}" style="${bg}">${esc(inner)}${dot !== undefined ? `<div class="dot ${dot ? 'on' : ''}"></div>` : ''}</div>`
 }
 
 function avatarOf (code) {
@@ -313,8 +392,11 @@ function render () {
     el.setAttribute('tabindex', '0')
     el.setAttribute('aria-label', el.title)
     el.setAttribute('aria-current', activeR ? 'page' : 'false')
+    // Discord hissi: bahsetme → kırmızı sayılı rozet; sıradan okunmamış → sessiz nokta
     const un = r.channels.reduce((s, ch) => s + (unread['room-' + r.topic + '#' + ch] || 0), 0)
-    if (un) el.innerHTML += `<span class="badge">${un}</span>`
+    const um = r.channels.reduce((s, ch) => s + (unreadMention['room-' + r.topic + '#' + ch] || 0), 0)
+    if (um) el.innerHTML += `<span class="badge">${um}</span>`
+    else if (un) el.innerHTML += '<span class="badge soft" title="Okunmamış mesaj var"></span>'
     el.onclick = () => openRoom(r)
     el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } }
     rail.appendChild(el)
@@ -481,14 +563,16 @@ function renderTabs () {
   bar.innerHTML = ''
   for (const ch of r.channels) {
     const el = document.createElement('div')
-    el.className = 'ch-tab' + (activeCh(r.topic) === ch ? ' active' : '')
+    const un = unread['room-' + r.topic + '#' + ch]
+    const um = unreadMention['room-' + r.topic + '#' + ch]
+    el.className = 'ch-tab' + (activeCh(r.topic) === ch ? ' active' : '') + (un ? ' has-unread' : '')
     el.setAttribute('role', 'button')
     el.setAttribute('tabindex', '0')
     el.setAttribute('aria-current', activeCh(r.topic) === ch ? 'page' : 'false')
-    const un = unread['room-' + r.topic + '#' + ch]
-    el.innerHTML = `# ${esc(ch)}${un ? `<span class="unread">${un}</span>` : ''}`
+    el.innerHTML = `# ${esc(ch)}${um ? `<span class="unread">${um}</span>` : un ? `<span class="unread soft">${un}</span>` : ''}`
     el.onclick = () => {
       activeChs[r.topic] = ch
+      captureUnreadMarker('room-' + r.topic + '#' + ch)
       markRead('room-' + r.topic + '#' + ch)
       render(); renderMessages()
     }
@@ -545,8 +629,35 @@ function renderMessages () {
   if (isRoom) msgs = msgs.filter(m => (m.ch || 'genel') === activeCh(activeConv.topic))
   const pendingIds = activeConv.type === 'dm' ? new Set(state.pending[activeConv.code] || []) : new Set()
 
+  // "YENİ" ayracı: açılışta yakalanan okunmamış sayısından yerini bul,
+  // ilk çizimde mesaj id'sine sabitle (yeni mesaj gelince kaymasın)
+  const curKey = activeConv.type === 'dm' ? conv : conv + '#' + activeCh(activeConv.topic)
+  let newSepAt = -1
+  if (unreadMarker && unreadMarker.key === curKey) {
+    if (unreadMarker.id) {
+      newSepAt = msgs.findIndex(x => x.id === unreadMarker.id)
+    } else {
+      let left = unreadMarker.count
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].from !== state.me.code && !msgs[i].call) {
+          left--
+          if (left <= 0) { newSepAt = i; break }
+        }
+      }
+      if (newSepAt >= 0) unreadMarker.id = msgs[newSepAt].id
+    }
+  }
+
   let lastFrom = null; let lastTs = 0; let lastDay = ''
-  for (const m of msgs) {
+  for (let mi = 0; mi < msgs.length; mi++) {
+    const m = msgs[mi]
+    if (mi === newSepAt) {
+      const us = document.createElement('div')
+      us.className = 'unread-sep'
+      us.innerHTML = '<span>YENİ</span>'
+      box.appendChild(us)
+      lastFrom = null
+    }
     const day = fmtDay(m.ts)
     if (day !== lastDay) {
       const sep = document.createElement('div')
@@ -573,7 +684,9 @@ function renderMessages () {
     } else {
       if (m.pinned) body += '<div class="msg-pinned">📌 sabitlendi</div>'
       if (m.re) body += `<div class="msg-reply">↩ <b>${esc(m.re.name || 'anon')}</b>: <span>${esc(m.re.text || '')}</span></div>`
+      if (m.fw) body += `<div class="msg-fw">↪ iletildi · aslı: <b>${esc(m.fw.name)}</b></div>`
       if (m.text) body += `<div class="msg-text">${fmt(m.text)}${m.edited ? ' <span class="msg-edited">(düzenlendi)</span>' : ''}${pending ? '<span class="msg-pending-mark">⏳</span>' : ''}</div>`
+      if (m.prev) body += prevHTML(m.prev)
       if (m.file) body += fileHTML(m)
     }
     const reacts = reactsHTML(m)
@@ -656,6 +769,10 @@ function toolsFor (m, conv, room) {
   rep.textContent = '↩'; rep.title = 'Yanıtla'
   rep.onclick = () => setReply(m)
   tools.appendChild(rep)
+  const fwd = document.createElement('button')
+  fwd.textContent = '↪'; fwd.title = 'İlet'
+  fwd.onclick = () => openForward(m, conv)
+  tools.appendChild(fwd)
   const pin = document.createElement('button')
   pin.textContent = '📌'; pin.title = m.pinned ? 'Sabiti kaldır' : 'Sabitle'
   pin.onclick = () => send({ t: 'pin', conv, msgId: m.id })
@@ -726,6 +843,7 @@ function openDM (f) {
   closeDrawer()
   activeConv = { type: 'dm', code: f.code }
   location.hash = 'dm-' + f.code
+  captureUnreadMarker('dm-' + f.code)
   markRead('dm-' + f.code)
   send({ t: 'history', conv: 'dm-' + f.code })
   render(); renderMessages()
@@ -737,6 +855,7 @@ function openRoom (r) {
   closeDrawer()
   activeConv = { type: 'room', topic: r.topic }
   location.hash = 'room-' + r.topic
+  captureUnreadMarker('room-' + r.topic + '#' + activeCh(r.topic))
   markRead('room-' + r.topic + '#' + activeCh(r.topic))
   send({ t: 'history', conv: 'room-' + r.topic })
   render(); renderMessages()
@@ -813,6 +932,12 @@ function hideModal (id, restoreFocus = true) {
   setTimeout(() => {
     let target = previous
     if (!target || !target.isConnected || target.disabled || target.closest('[inert]')) target = $('btn-menu')
+    // Yedek de inert olabilir (modal, açık ayarların ÜSTÜNDE kapandıysa #app inert):
+    // odağı görünür ayar paneline ver, yoksa klavye odağı BODY'de kaybolur.
+    if (!target || target.closest('[inert]')) {
+      const st = $('settings')
+      target = (st && !st.classList.contains('hidden') && !st.inert) ? $('set-close') : null
+    }
     if (target && target.focus) target.focus()
   }, 0)
 }
@@ -1007,9 +1132,15 @@ document.addEventListener('pointerdown', (e) => {
 
 // mesaj gönderme + yazıyor sinyali
 let lastTyping = 0
+let prevWarmT = null
 $('msg-input').oninput = () => {
   mentionIdx = 0
   renderMentionPop()
+  clearTimeout(prevWarmT) // önizlemeyi yazma durunca ısıt (yarım URL'lere istek atma)
+  prevWarmT = setTimeout(() => {
+    const u = firstUrl($('msg-input').value)
+    if (u) fetchPreview(u)
+  }, 600)
   if (!activeConv || Date.now() - lastTyping < 2500) return
   lastTyping = Date.now()
   if (activeConv.type === 'dm') send({ t: 'typing', to: activeConv.code })
@@ -1051,11 +1182,59 @@ $('msg-input').onkeydown = (e) => {
   const text = $('msg-input').value.trim()
   if (!text || !activeConv) return
   const re = replyTarget || undefined
-  if (activeConv.type === 'dm') send({ t: 'send-dm', code: activeConv.code, text, re })
-  else send({ t: 'send-room', topic: activeConv.topic, ch: activeCh(activeConv.topic), text, re })
+  const conv = activeConv
+  const ch = conv.type === 'room' ? activeCh(conv.topic) : null
   $('msg-input').value = ''
   clearReply()
+  unreadMarker = null
+  // Önizleme beklenirken sıra bozulmasın diye gönderimler zincire dizilir;
+  // kart hazır değilse en fazla 1.5 sn beklenir, gelmezse kartsız gider.
+  sendChain = sendChain.then(async () => {
+    let prev
+    const u = firstUrl(text)
+    if (u) prev = await Promise.race([fetchPreview(u), new Promise(r => setTimeout(r, 1500))]) || undefined
+    if (conv.type === 'dm') send({ t: 'send-dm', code: conv.code, text, re, prev })
+    else send({ t: 'send-room', topic: conv.topic, ch, text, re, prev })
+  })
 }
+let sendChain = Promise.resolve()
+
+// ---- mesaj iletme ----
+let forwardSrc = null // { conv, msgId }
+function openForward (m, conv) {
+  forwardSrc = { conv, msgId: m.id }
+  $('forward-src').innerHTML = `<b>${esc(m.name || 'anon')}</b>: ${esc((m.text || (m.file ? '📎 ' + m.file.fname : '')).slice(0, 120))}`
+  const box = $('forward-targets')
+  box.innerHTML = ''
+  for (const f of state.friends.filter(x => x.status === 'friend')) {
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'fw-target'
+    el.innerHTML = `${avatarHTML(f.avatar, f.name, f.code)}<span>${esc(nameOf(f))}</span>`
+    el.onclick = () => doForward({ code: f.code })
+    box.appendChild(el)
+  }
+  for (const r of state.rooms) {
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = 'fw-target'
+    el.innerHTML = `<span class="fw-room" style="background:${colorOf(r.topic)}">${esc(r.name.trim()[0].toUpperCase())}</span><span>${esc(r.name)} · #${esc(activeCh(r.topic))}</span>`
+    el.onclick = () => doForward({ room: r.topic, ch: activeCh(r.topic) })
+    box.appendChild(el)
+  }
+  if (!box.children.length) {
+    box.innerHTML = '<div class="group-empty"><span>👥</span><b>İletilecek yer yok</b><small>Önce bir arkadaş ekle ya da odaya katıl.</small></div>'
+  }
+  showModal('modal-forward')
+}
+function doForward (target) {
+  if (!forwardSrc) return
+  send({ t: 'forward', ...target, conv: forwardSrc.conv, msgId: forwardSrc.msgId })
+  forwardSrc = null
+  hideModal('modal-forward')
+  toast('Mesaj iletildi ✓', 'success')
+}
+$('btn-close-forward').onclick = () => hideModal('modal-forward')
 
 // dosya gönderme
 $('btn-attach').onclick = () => { if (activeConv) $('file-input').click() }
@@ -1193,7 +1372,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     const top = topVisibleModal()
     if (top) {
-      if (top.id === 'modal-search' || top.id === 'modal-room' || top.id === 'modal-transfer' || (top.id === 'modal-profile' && state.me.name)) hideModal(top.id)
+      if (top.id === 'modal-search' || top.id === 'modal-room' || top.id === 'modal-transfer' || top.id === 'modal-forward' || (top.id === 'modal-profile' && state.me.name)) hideModal(top.id)
       return
     }
     $('member-list').classList.remove('panel-open')

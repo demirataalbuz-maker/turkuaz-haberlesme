@@ -191,6 +191,18 @@ async function main () {
   // sayfayı "odaklı" say (pano/bildirim testleri gerçek odak ister).
   await pA.cmd('Emulation.setFocusEmulationEnabled', { enabled: true })
   await pB.cmd('Emulation.setFocusEmulationEnabled', { enabled: true })
+  // Sayfa script yarışı bekçisi: CDP hedefi HTML parse olur olmaz bulunur; ağır
+  // vendor dosyaları yüklenirken (yavaş/yoğun makinede) voice.js henüz çalışmamış
+  // olabilir → 'Voice is not defined' flake'i. İlk eval'den önce scriptleri bekle.
+  for (const p of [pA, pB]) {
+    await p.waitEval('sayfa scriptleri hazır', `typeof Voice !== 'undefined' && typeof Games !== 'undefined' && typeof TurkuazSettings !== 'undefined'`, 60000)
+    // Profil modalı yarışı: isim state'i render'dan ÖNCE gelmezse render()
+    // modal-profile'ı otomatik açar ve isim gelse bile KAPANMAZ — açık modal
+    // #app'i inert yapıp odak geri yükleme sözleşmelerini bozar (flake kaynağı).
+    // İsim gelene dek bekle, gelmişse modalı kapat (ifade yan etkisiyle).
+    await p.waitEval('profil state geldi + modal kapalı',
+      `typeof state !== 'undefined' && state.me && !!state.me.name && (hideModal('modal-profile', false) || true) && document.getElementById('modal-profile').classList.contains('hidden')`, 30000)
+  }
 
   console.log('--- 1) Kopyalama butonu (pano izni)')
   await pA.cmd('Page.bringToFront')
@@ -281,6 +293,13 @@ async function main () {
   const mobileMenu = await pA.eval(`(async () => {
     window.dispatchEvent(new Event('resize'))
     await new Promise(r => setTimeout(r, 120))
+    // Yoğun makinede setTimeout(0) odak geri yükleme 30ms'yi aşabilir — sabit
+    // uyku yerine şart gerçekleşene dek yokla (flake değil, sözleşme ölçer)
+    const until = async (fn, ms) => {
+      const t0 = Date.now()
+      while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise(r => setTimeout(r, 50)) }
+      return fn()
+    }
     closeDrawer()
     const rail = document.getElementById('rail')
     const drawerClosedInert = rail.inert && document.getElementById('sidebar').inert
@@ -297,8 +316,7 @@ async function main () {
       Number(getComputedStyle(roomModal).zIndex) > Number(getComputedStyle(rail).zIndex)
     const modalFocus = document.activeElement.id === 'room-name-input'
     hideModal('modal-room')
-    await new Promise(r => setTimeout(r, 30))
-    const modalFocusRestored = document.activeElement.id === 'btn-menu'
+    const modalFocusRestored = await until(() => document.activeElement.id === 'btn-menu', 3000)
 
     openRoom(state.rooms[0])
     const mt = document.querySelector('.members-toggle')
@@ -309,7 +327,10 @@ async function main () {
     syncMemberPanel()
 
     TurkuazSettings.open('appearance')
-    await new Promise(r => setTimeout(r, 80))
+    // open() odağı setTimeout(0) ile set-close'a verir — ilk until kontrolü
+    // yield'süz dönerse timer henüz çalışmamış olur; bir tur bekle
+    await new Promise(r => setTimeout(r, 60))
+    await until(() => !document.getElementById('settings').classList.contains('hidden') && document.getElementById('set-content').clientWidth > 0, 3000)
     const nav = document.getElementById('set-nav')
     const row = document.querySelector('#set-panel .set-row')
     const navFlow = getComputedStyle(nav).flexDirection
@@ -318,14 +339,25 @@ async function main () {
     const content = document.getElementById('set-content')
     const settingsResponsive = navFlow === 'row' && rowFlow === 'column' &&
       settingsBox.width <= innerWidth + 1 && content.scrollWidth <= content.clientWidth + 1
+    const beforeRing = document.activeElement && (document.activeElement.id || document.activeElement.tagName)
     showModal('modal-ring', 'btn-ring-accept')
-    await new Promise(r => setTimeout(r, 30))
-    const ringOverSettings = document.getElementById('settings').inert && document.activeElement.id === 'btn-ring-accept'
+    const ringOverSettings = await until(() => document.getElementById('settings').inert && document.activeElement.id === 'btn-ring-accept', 3000)
     hideModal('modal-ring')
-    await new Promise(r => setTimeout(r, 30))
-    const settingsRecovered = !document.getElementById('settings').inert && document.getElementById('settings').contains(document.activeElement)
+    const settingsRecovered = await until(() => !document.getElementById('settings').inert && document.getElementById('settings').contains(document.activeElement), 3000)
+    const afterRing = document.activeElement && (document.activeElement.id || document.activeElement.tagName)
     document.getElementById('set-close').click()
-    return { drawerClosedInert, mainWide, drawerOpen, modalAboveDrawer, modalFocus, modalFocusRestored, membersAvailable, settingsResponsive, ringOverSettings, settingsRecovered, navFlow, rowFlow, contentWidth: content.scrollWidth + '/' + content.clientWidth, width: innerWidth }
+    // Teşhis: sözleşme bozulursa fail çıktısında durumu gör
+    const st = document.getElementById('settings')
+    const bm = document.getElementById('btn-menu')
+    const diag = {
+      active: document.activeElement && (document.activeElement.id || document.activeElement.tagName),
+      setCls: st.className, setDisp: getComputedStyle(st).display,
+      setRect: Math.round(st.getBoundingClientRect().width) + 'x' + Math.round(st.getBoundingClientRect().height),
+      contentRect: Math.round(content.getBoundingClientRect().width) + 'x' + Math.round(content.getBoundingClientRect().height),
+      bmInert: !!(bm.closest('[inert]')), bmRect: Math.round(bm.getBoundingClientRect().width) + 'x' + Math.round(bm.getBoundingClientRect().height),
+      beforeRing, afterRing
+    }
+    return { drawerClosedInert, mainWide, drawerOpen, modalAboveDrawer, modalFocus, modalFocusRestored, membersAvailable, settingsResponsive, ringOverSettings, settingsRecovered, navFlow, rowFlow, contentWidth: content.scrollWidth + '/' + content.clientWidth, width: innerWidth, diag }
   })()`)
   if (CAPTURE_DIR) {
     await pA.eval("document.getElementById('btn-menu').click(); true")

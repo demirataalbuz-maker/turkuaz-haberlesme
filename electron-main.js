@@ -45,6 +45,11 @@ if (process.env.PEERCORD_FAKE_MEDIA || process.env.TURKUAZ_FAKE_MEDIA) {
 }
 app.setAppUserModelId(APP_ID)
 
+// Ana süreçte yakalanmamış hata pencereyi/tepsiyi çökertip uygulamayı sessizce
+// öldürmesin — güncelleyici log dosyasına düşür, uygulama ayakta kalsın.
+process.on('uncaughtException', (e) => { try { console.error('main uncaught:', (e && (e.stack || e.message)) || e) } catch {} })
+process.on('unhandledRejection', (e) => { try { console.error('main unhandled:', (e && (e.stack || e.message)) || e) } catch {} })
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function portInUse (port) {

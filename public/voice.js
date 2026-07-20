@@ -922,7 +922,7 @@ const Voice = {
       this.markSeen(this.room, from, data.name)
       const m = this.ensureMember(from, data.name)
       m.muted = !!data.muted
-      m.avatar = data.avatar || ''
+      m.avatar = String(data.avatar || '').slice(0, 8) // uzak veri: emoji boyutunda tut
       m.screenSid = data.screen || null
       if (data.pos) { m.pos = this.clampPos(data.pos); this.updatePanner(m); this.avoidOverlap() }
       this.updateBubble(m)
@@ -969,7 +969,7 @@ const Voice = {
         if (!ev.on) { this.removeMember(from); return }
         const m = this.ensureMember(from, name)
         m.muted = !!ev.muted
-        m.avatar = ev.avatar || m.avatar
+        m.avatar = ev.avatar ? String(ev.avatar).slice(0, 8) : m.avatar
         m.screenSid = ev.screen || null
         if (ev.pos) { m.pos = this.clampPos(ev.pos); this.updatePanner(m) }
         this.updateBubble(m)
@@ -1058,9 +1058,11 @@ const Voice = {
   makeBubble (code, name, avatar, mine) {
     const b = document.createElement('div')
     b.className = 'lr-bubble' + (mine ? ' me' : '')
+    // avatar UZAK peer'dan gelir (rtc hello) ve çekirdekte sanitize edilmez —
+    // ham basılırsa <img onerror> ile bu origin'de JS çalışır (seed hırsızlığı).
     const face = avatar
-      ? `<div class="lr-face" style="background:var(--bg3);font-size:38px">${avatar}<video autoplay playsinline muted></video><span class="lr-initial" style="display:none"></span></div>`
-      : `<div class="lr-face" style="background:${colorOf(code)}"><video autoplay playsinline muted></video><span class="lr-initial">${initialOf(name, code)}</span></div>`
+      ? `<div class="lr-face" style="background:var(--bg3);font-size:38px">${esc(avatar)}<video autoplay playsinline muted></video><span class="lr-initial" style="display:none"></span></div>`
+      : `<div class="lr-face" style="background:${colorOf(code)}"><video autoplay playsinline muted></video><span class="lr-initial">${esc(initialOf(name, code))}</span></div>`
     b.innerHTML = face + '<div class="lr-name"></div>'
     this.el('lr-stage').appendChild(b)
     if (mine) this.makeDraggable(b)
