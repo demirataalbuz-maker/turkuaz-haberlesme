@@ -1005,6 +1005,7 @@ const Voice = {
     join.disabled = this.joining
     join.textContent = this.joining ? '⏳ Ses hazırlanıyor…' : '🎧 Sesli sohbete katıl'
 
+    lr.classList.toggle('lr-idle', !active) // katılmadan önce sahne kompakt
     this.el('lr-overlay').classList.toggle('hidden', active)
     this.el('lr-controls').classList.toggle('hidden', !active)
     if (!active) {

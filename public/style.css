@@ -893,3 +893,8 @@ button { font-family: inherit; }
 .msg-audio { width: 100%; height: 40px; }
 .msg-audio-name { color: var(--tx3); font-size: 12px; padding-left: 2px; }
 @media (max-width: 760px) { #btn-voicemsg { min-width: 38px; height: 38px; } }
+
+/* Sesli sohbete katılmamışken oturma odası sahnesi kompakt dursun:
+   koca boş sahne yerine mesajlara alan kalsın (katılınca eski boyuta döner) */
+#livingroom.lr-idle #lr-stage { height: 118px; }
+@media (max-width: 760px) { #livingroom.lr-idle #lr-stage { height: 96px; } }

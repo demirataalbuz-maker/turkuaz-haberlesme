@@ -435,7 +435,12 @@ button.screen-opt { padding: 0; color: var(--tx); text-align: left; font: inheri
 
 /* Phone/WebView menu drawer. Kept in sync with app.js' 760px contract. */
 @media (max-width: 760px) {
-  #rail { width: 62px; padding-left: 6px; padding-right: 6px; }
+  /* KRİTİK: bu dosyanın temel #rail/#sidebar kuralları position:relative der ve
+     style.css'teki mobil position:fixed'i ezer (menu.css sonra yüklenir).
+     Fixed olmazsa çekmeceler kapalıyken bile flex akışında yer kaplar ve
+     sohbet alanı ~40px'e sıkışır (390px'te rail 62 + sidebar 286 = 348px). */
+  #rail, #sidebar { position: fixed; top: 0; bottom: 0; height: auto; }
+  #rail { left: 0; width: 62px; padding-left: 6px; padding-right: 6px; }
   .rail-logo, .rail-btn { width: 48px; height: 48px; flex-basis: 48px; }
   #sidebar { left: 62px; width: min(78vw, 294px); }
   body.drawer-open #drawer-back { z-index: 80; backdrop-filter: blur(3px); }

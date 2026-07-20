@@ -284,6 +284,9 @@ async function main () {
     closeDrawer()
     const rail = document.getElementById('rail')
     const drawerClosedInert = rail.inert && document.getElementById('sidebar').inert
+    // Çekmece kapalıyken sohbet TAM genişlik olmalı: rail/sidebar akıştan
+    // çıkmazsa (position:fixed kaybolursa) main ~40px'e sıkışır (menu.css regresyonu)
+    const mainWide = document.querySelector('main').getBoundingClientRect().width >= innerWidth - 8
     document.getElementById('btn-menu').click()
     const drawerOpen = document.body.classList.contains('drawer-open') && !rail.inert
     document.getElementById('btn-add-room').focus()
@@ -322,7 +325,7 @@ async function main () {
     await new Promise(r => setTimeout(r, 30))
     const settingsRecovered = !document.getElementById('settings').inert && document.getElementById('settings').contains(document.activeElement)
     document.getElementById('set-close').click()
-    return { drawerClosedInert, drawerOpen, modalAboveDrawer, modalFocus, modalFocusRestored, membersAvailable, settingsResponsive, ringOverSettings, settingsRecovered, navFlow, rowFlow, contentWidth: content.scrollWidth + '/' + content.clientWidth, width: innerWidth }
+    return { drawerClosedInert, mainWide, drawerOpen, modalAboveDrawer, modalFocus, modalFocusRestored, membersAvailable, settingsResponsive, ringOverSettings, settingsRecovered, navFlow, rowFlow, contentWidth: content.scrollWidth + '/' + content.clientWidth, width: innerWidth }
   })()`)
   if (CAPTURE_DIR) {
     await pA.eval("document.getElementById('btn-menu').click(); true")
@@ -337,7 +340,7 @@ async function main () {
   await pA.eval("window.dispatchEvent(new Event('resize')); true")
   if (!mobileMenu.drawerClosedInert || !mobileMenu.drawerOpen || !mobileMenu.modalAboveDrawer || !mobileMenu.modalFocus ||
       !mobileMenu.modalFocusRestored || !mobileMenu.membersAvailable || !mobileMenu.settingsResponsive ||
-      !mobileMenu.ringOverSettings || !mobileMenu.settingsRecovered || mobileMenu.width !== 390) {
+      !mobileMenu.ringOverSettings || !mobileMenu.settingsRecovered || !mobileMenu.mainWide || mobileMenu.width !== 390) {
     fail('mobil menü sözleşmesi bozuk: ' + JSON.stringify(mobileMenu))
   }
   console.log('PASS: menü hizası, mobil drawer, modal katmanı, üye paneli ve ayarlar responsive')
