@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DFN boru hattı testi</title>
+<style>body{font:14px monospace;background:#10201e;color:#cde;padding:20px}#log div{margin:2px 0}</style>
+<button id="start">Testi başlat</button>
+<div id="log"></div>
+<script>
+// DeepFilterNet tam zincir testi — mikrofon GEREKMEZ.
+// Sentetik kaynak (220 Hz ton + beyaz gürültü) → dfn-worklet → dfn-worker
+// (ONNX model) → analyser. Başarı ölçütleri konsola [DFN-TEST] ile yazılır.
+const log = (s) => {
+  const d = document.createElement('div'); d.textContent = s
+  document.getElementById('log').appendChild(d)
+  console.log('[DFN-TEST]', s)
+}
+document.getElementById('start').onclick = async () => {
+  try {
+    const ctx = new AudioContext({ sampleRate: 48000 })
+    await ctx.resume()
+    log('AudioContext 48kHz açık')
+
+    await ctx.audioWorklet.addModule('dfn-worklet.js')
+    const worker = new Worker('dfn-worker.js')
+    const ready = new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('model zaman aşımı')), 20000)
+      worker.onmessage = (e) => {
+        if (e.data === 'ready') { clearTimeout(to); res() }
+        else if (e.data && e.data.t === 'fail') { clearTimeout(to); rej(new Error(e.data.err)) }
+      }
+      worker.onerror = (e) => { clearTimeout(to); rej(new Error(e.message || 'worker hata')) }
+    })
+    const ch = new MessageChannel()
+    const t0 = performance.now()
+    worker.postMessage({ t: 'init', model: 'vendor/dfn/denoiser_model.onnx', port: ch.port2 }, [ch.port2])
+    await ready
+    log('model yüklendi: ' + Math.round(performance.now() - t0) + ' ms')
+
+    const node = new AudioWorkletNode(ctx, 'dfn-bridge', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+    node.port.postMessage({ t: 'connect', port: ch.port1 }, [ch.port1])
+
+    // kaynak: GERÇEK konuşma kaydı (sokak gürültülü resmi test örneği).
+    // Sentetik ton kullanma: DFN konuşma-dışı her şeyi bastırdığı için saf
+    // ton "sessizlik" çıkarır ve test yanlış FAIL verir.
+    const resp = await fetch('dfn-test.wav')
+    if (!resp.ok) throw new Error('dfn-test.wav bulunamadı (' + resp.status + ')')
+    const buf = await ctx.decodeAudioData(await resp.arrayBuffer())
+    log('kayıt: ' + buf.duration.toFixed(1) + ' sn @ ' + buf.sampleRate + ' Hz')
+    const src = ctx.createBufferSource(); src.buffer = buf
+    const anIn = ctx.createAnalyser(); anIn.fftSize = 2048
+    const anOut = ctx.createAnalyser(); anOut.fftSize = 2048
+    const sink = ctx.createGain(); sink.gain.value = 0 // hoparlöre basma
+    src.connect(anIn); src.connect(node); node.connect(anOut); anOut.connect(sink); sink.connect(ctx.destination)
+    src.start()
+    log('akış başladı, 4 sn ölçülüyor…')
+
+    const rms = (an) => {
+      const b = new Float32Array(an.fftSize)
+      an.getFloatTimeDomainData(b)
+      let s = 0; for (const v of b) s += v * v
+      return Math.sqrt(s / b.length)
+    }
+    let inAcc = 0; let outAcc = 0; let n = 0; let outNonZero = 0
+    await new Promise((res) => {
+      const int = setInterval(() => {
+        const i = rms(anIn); const o = rms(anOut)
+        inAcc += i; outAcc += o; n++
+        if (o > 1e-4) outNonZero++
+        if (n >= 40) { clearInterval(int); res() }
+      }, 100)
+    })
+    const stats = await new Promise((res) => {
+      worker.onmessage = (e) => { if (e.data && e.data.t === 'stats') res(e.data) }
+      worker.postMessage({ t: 'stats' })
+    })
+    log('giriş RMS ort: ' + (inAcc / n).toFixed(4))
+    log('çıkış RMS ort: ' + (outAcc / n).toFixed(4) + ' (gürültü kırpıldıysa girişten düşük olmalı)')
+    log('çıkışta ses var: ' + outNonZero + '/' + n + ' örneklem')
+    log('worker: ' + stats.frames + ' kare, ort ' + stats.avgMs.toFixed(2) + ' ms, max ' + stats.maxMs.toFixed(2) + ' ms (bütçe 10 ms)')
+    // Python referansı (aynı kayıt, aynı model): giriş RMS ~0.10 → çıkış ~0.08.
+    // Konuşma korunmuş + gürültü kırpılmış aralığı kabul et.
+    const outRms = outAcc / n
+    const pass = stats.frames > 300 && stats.avgMs < 8 && outRms > 0.02 && outRms < (inAcc / n)
+    log(pass ? 'SONUC: PASS' : 'SONUC: FAIL')
+    src.stop(); worker.terminate(); ctx.close()
+  } catch (e) {
+    log('HATA: ' + e.message)
+    log('SONUC: FAIL')
+  }
+}
+</script>

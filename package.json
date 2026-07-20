@@ -1,6 +1,6 @@
 {
   "name": "turkuaz",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "license": "GPL-3.0-only",
   "description": "Turkuaz — serversız P2P sohbet: verin kendi PC'nde, bağlantı arkadaş koduyla",
   "desktopName": "Turkuaz.desktop",
@@ -96,6 +96,7 @@
     "bare-process": "^4.5.1",
     "electron": "^43.1.0",
     "electron-builder": "^26.15.3",
-    "js-yaml": "^4.3.0"
+    "js-yaml": "^4.3.0",
+    "onnxruntime-web": "^1.27.0"
   }
 }

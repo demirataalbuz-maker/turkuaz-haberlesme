@@ -209,13 +209,14 @@
       selectEl([
         { value: 'off', label: 'Kapalı' },
         { value: 'standard', label: 'Standart' },
-        { value: 'strong', label: 'Güçlü — AI (RNNoise)' }
+        { value: 'strong', label: 'Güçlü — AI (RNNoise, hafif)' },
+        { value: 'dfn', label: 'En güçlü — AI+ (DeepFilterNet)' }
       ], settings.noise || 'standard', v => TurkuazSettings.set('noise', v)),
-      'AI modu klavye/fan/arka plan sesini bastırır. Değişiklik bir sonraki katılım/aramada geçerli.'))
+      '"En güçlü" klavye tıkırtısı ve ani sesleri de bastırır; konuşurken tek çekirdeğin ~%10-15\'ini kullanır. Değişiklik bir sonraki katılım/aramada geçerli.'))
     const cores = navigator.hardwareConcurrency || '?'
     const mem = navigator.deviceMemory ? ('~' + navigator.deviceMemory + ' GB') : '?'
     const sys = document.createElement('div'); sys.className = 'set-note-box'
-    sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. AI gürültü engelleme (RNNoise) hafiftir, her cihazda çalışır. Daha güçlü <b>DeepFilterNet</b> (~137 MB) güçlü makineler için isteğe bağlı indirilecek — yakında.`
+    sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. İki AI motoru da pakete dahil, indirme yok: <b>RNNoise</b> (hafif, sabit uğultuda iyi) ve <b>DeepFilterNet3</b> (16 MB, klavye/ani seslerde belirgin üstün). DeepFilterNet açılamazsa otomatik RNNoise'a düşülür.`
     gNoise.appendChild(sys)
     p.appendChild(gNoise)
 

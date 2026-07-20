@@ -17,8 +17,11 @@ Bağlantılar kişiye özel kriptografik kodlarla kurulur, uçtan uca şifrelidi
   sesler konuma göre yönlü gelir — HRTF), kamera (480p/720p/1080p),
   **ekran paylaşımı** (720p→4K, ayarlanabilir FPS, adaptif bitrate — ağ
   daralınca görüntü kısılır ses korunur), video codec seçimi (H264 = GPU
-  encode, oyun dostu / AV1), konuşma göstergesi, RNNoise gürültü engelleme
-  (AudioWorklet — arayüz yoğunken ses çıtırdamaz), bağlantı kalite göstergesi,
+  encode, oyun dostu / AV1), konuşma göstergesi, **iki kademeli AI gürültü
+  engelleme** — RNNoise (hafif) ve DeepFilterNet3 ("En güçlü" modu: klavye
+  tıkırtısı/ani seslerde belirgin üstün; 16 MB model pakete gömülü, indirme
+  ve CDN yok, Worker+AudioWorklet'te çalışır — üretim kaydı:
+  `public/vendor/dfn/PROVENANCE.md`), bağlantı kalite göstergesi,
   kalıcı ses dock'u ve DM'den **birebir arama** (native bildirim, kabul/red,
   arama geçmişi sohbete işlenir)
 - **Oyun kullanımı**: pencere arkasında da çalışan `Ctrl+Shift+M` sustur/aç,

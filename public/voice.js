@@ -140,16 +140,53 @@ async function ensureRnnWorklet (ctx) {
   }
   return ctx._rnnWorklet
 }
+// DeepFilterNet3 düğümü: worklet köprüsü + model worker'ı birlikte kurar.
+// Başarısızlıkta null döner; buildMic RNNoise'a düşer. (Model ~16 MB pakete
+// gömülü — vendor/dfn/; çalıştırıcı vendor/ort/ — CDN'e çıkılmaz.)
+async function makeDfnNode (ctx) {
+  try {
+    if (!ctx._dfnModule) { await ctx.audioWorklet.addModule('dfn-worklet.js'); ctx._dfnModule = true }
+    const worker = new Worker('dfn-worker.js')
+    const ready = new Promise((resolve, reject) => {
+      const to = setTimeout(() => reject(new Error('model 15 sn içinde yüklenemedi')), 15000)
+      worker.onmessage = (e) => {
+        if (e.data === 'ready') { clearTimeout(to); resolve() }
+        else if (e.data && e.data.t === 'fail') { clearTimeout(to); reject(new Error(e.data.err)) }
+      }
+      worker.onerror = (e) => { clearTimeout(to); reject(new Error(e.message || 'dfn-worker yüklenemedi')) }
+    })
+    const ch = new MessageChannel()
+    worker.postMessage({ t: 'init', model: 'vendor/dfn/denoiser_model.onnx', port: ch.port2 }, [ch.port2])
+    await ready
+    const node = new AudioWorkletNode(ctx, 'dfn-bridge', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+    node.port.postMessage({ t: 'connect', port: ch.port1 }, [ch.port1])
+    node._dfnWorker = worker
+    node._rnnoiseCleanup = () => {
+      try { node.port.postMessage('destroy') } catch {}
+      try { worker.terminate() } catch {}
+    }
+    return node
+  } catch (e) {
+    console.error('DeepFilterNet yüklenemedi:', e)
+    return null
+  }
+}
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
-  const wantsStrong = _settings().noise === 'strong'
+  const noiseMode = _settings().noise || 'standard'
   const Ctx = window.AudioContext || window.webkitAudioContext
-  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise 48 kHz ister
+  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise/DFN 48 kHz ister
   try { obj.ctx.resume() } catch {}
-  // Tercih sırası: AudioWorklet → ScriptProcessor (noise.js) → tarayıcı NS
+  // Tercih sırası: DeepFilterNet → RNNoise worklet → ScriptProcessor → tarayıcı NS
+  let dfnNode = null
+  if (noiseMode === 'dfn') {
+    dfnNode = await makeDfnNode(obj.ctx)
+    if (!dfnNode && window.toast) toast('DeepFilterNet başlatılamadı; RNNoise kullanılıyor.', 'warn', 5000)
+  }
+  const wantsStrong = noiseMode === 'strong' || (noiseMode === 'dfn' && !dfnNode)
   const workletOk = wantsStrong && await ensureRnnWorklet(obj.ctx)
-  const rnnoiseReady = workletOk || !!(window.RNNoise && window.RNNoise.ready)
+  const rnnoiseReady = !!dfnNode || workletOk || !!(window.RNNoise && window.RNNoise.ready)
   let constraints = micConstraints(wantsStrong && !rnnoiseReady)
   let raw
   try {
@@ -168,9 +205,12 @@ async function buildMic (obj) {
   obj.inGain = obj.ctx.createGain()
   obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
   const dest = obj.ctx.createMediaStreamDestination()
-  // AI gürültü engelleme (RNNoise): 'strong' modda zincire gir
+  // AI gürültü engelleme: DFN → RNNoise worklet → ScriptProcessor sırasıyla
   let head = src
-  if (wantsStrong && workletOk) {
+  if (dfnNode) {
+    src.connect(dfnNode); head = dfnNode; obj._denoise = dfnNode
+  }
+  if (head === src && wantsStrong && workletOk) {
     try {
       const dn = new AudioWorkletNode(obj.ctx, 'rnnoise', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
       dn._rnnoiseCleanup = () => { try { dn.port.postMessage('destroy') } catch {} }
