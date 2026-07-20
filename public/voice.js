@@ -232,6 +232,10 @@ const LR_SCALE = 8
 const VOICE_HEARTBEAT_MS = 5000
 const VOICE_STALE_MS = 18000
 const VOICE_STATS_MS = 4000
+// Faz 2 — yakınlık-tabanlı ses budama (yalnız kalabalık + konumsal modda)
+const PRUNE_MIN = 12   // bu kişi sayısının ALTINDA budama YOK (herkes birbirini duyar)
+const AUDIBLE_IN = 40  // sahne-yüzdesi mesafesi: bu altına gelince duyulmaya başlar
+const AUDIBLE_OUT = 52 // bu üstüne çıkınca kesilir (histerezis — sınırda titremesin)
 
 function tuneAudioSender (sender) {
   if (!sender || !sender.getParameters || !sender.setParameters) return
@@ -631,7 +635,8 @@ const Voice = {
       bubble: null, makingOffer: false,
       polite: this.code() > code,
       pendingIce: [], recoveryTimer: null, restarted: false,
-      quality: 'connecting', rtt: null, jitter: null, loss: null, _packetBase: null
+      quality: 'connecting', rtt: null, jitter: null, loss: null, _packetBase: null,
+      _audible: true // varsayılan duyulur → az kişide gereksiz replaceTrack yok
     }
     this.members.set(code, m)
     this.createPC(m)
@@ -644,7 +649,7 @@ const Voice = {
     m.pc = pc
     for (const track of this.mic.getTracks()) {
       const sender = pc.addTrack(track, this.mic)
-      if (track.kind === 'audio') tuneAudioSender(sender)
+      if (track.kind === 'audio') { tuneAudioSender(sender); m.micSender = sender } // budama için sakla
     }
     if (this.cam) tuneVideoSender(pc.addTrack(this.cam.getVideoTracks()[0], this.mic), false)
     if (this.screen) {
@@ -766,6 +771,31 @@ const Voice = {
   },
   updateAllPanners () { for (const m of this.members.values()) this.updatePanner(m) },
   updateAllProximity () { for (const m of this.members.values()) this.applyProximity(m) },
+
+  // ---- Faz 2: yakınlık-tabanlı ses budama ----
+  // Uzaktaki kişilere mikrofonu göndermeyi keser (replaceTrack(null)) → encode +
+  // bant genişliği tasarrufu; simetrik olduğu için karşılıklı kesilir. GÜVENLİK:
+  // yalnız kalabalık (>= PRUNE_MIN) + konumsal modda; az kişide/düz modda herkes
+  // birbirini duyar (mevcut davranış). replaceTrack renegotiation gerektirmez.
+  _micTrack () { return this.mic ? (this.mic.getAudioTracks()[0] || null) : null },
+  updateAudible () {
+    const crowded = this.members.size >= PRUNE_MIN && !this.flat() && !!this.myPos
+    for (const m of this.members.values()) {
+      let on = true
+      if (crowded && m.pos) {
+        const d = Math.hypot(m.pos.x - this.myPos.x, m.pos.y - this.myPos.y)
+        on = (m._audible !== false) ? d <= AUDIBLE_OUT : d <= AUDIBLE_IN
+      }
+      this._setAudible(m, on)
+    }
+  },
+  _setAudible (m, on) {
+    if (m._audible === on) return
+    m._audible = on
+    if (m.micSender) { try { m.micSender.replaceTrack(on ? this._micTrack() : null) } catch {} }
+    if (m.bubble) m.bubble.classList.toggle('out-of-range', !on)
+  },
+  _audibleSoon () { clearTimeout(this._audTimer); this._audTimer = setTimeout(() => this.updateAudible(), 140) },
 
   // ---- sesli sohbet modu: 'spatial' (oturma odası, HRTF) | 'flat' (düz, eşit seviye) ----
   flat () { return (_settings().voiceMode || 'spatial') === 'flat' },
@@ -1054,7 +1084,9 @@ const Voice = {
       if (!m) return
       m.pos = this.clampPos({ x: Number(ev.x) || 0, y: Number(ev.y) || 0 })
       this.updatePanner(m)
+      this._audibleSoon() // bu kişi yaklaştı/uzaklaştı → duyulurluğu tazele
       if (this.flat()) { this.arrangeFlatGrid(); return } // düz modda ızgara sabit
+      this.applyProximity(m)
       this.positionBubble(m)
       this.avoidOverlap() // üstüme geldiyse kenara kay (toink)
     }
@@ -1120,6 +1152,7 @@ const Voice = {
       mb.title = flat ? 'Konumsal (oturma odası) moduna geç' : 'Düz konuşma moduna geç'
       mb.setAttribute('aria-label', mb.title)
     }
+    this._audibleSoon() // üyelik/mod değişince budamayı tazele
   },
 
   syncTheater (inRoomView) {
@@ -1233,6 +1266,7 @@ const Voice = {
         b.style.top = this.myPos.y + '%'
         this.updateAllPanners()
         this.updateAllProximity() // ben hareket edince herkesin bana uzaklığı değişir
+        this._audibleSoon()
         this.sendPos()
       }
       const up = () => {
@@ -1633,7 +1667,7 @@ document.addEventListener('DOMContentLoaded', () => {
         y: Math.min(88, Math.max(10, ((e.clientY - r.top) / r.height) * 100))
       })
       if (Voice._myBubble) { Voice._myBubble.style.left = Voice.myPos.x + '%'; Voice._myBubble.style.top = Voice.myPos.y + '%' }
-      Voice.updateAllPanners(); Voice.updateAllProximity(); Voice.sendPos(); Voice.sendState()
+      Voice.updateAllPanners(); Voice.updateAllProximity(); Voice._audibleSoon(); Voice.sendPos(); Voice.sendState()
     })
   })()
   Voice.el('voice-dock-return').onclick = () => {

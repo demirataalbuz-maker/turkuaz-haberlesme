@@ -954,3 +954,6 @@ button { font-family: inherit; }
 .lr-bubble.focused .lr-face { box-shadow: 0 0 0 4px var(--tq), 0 6px 22px rgba(0, 0, 0, .55); }
 .lr-bubble.ducked { opacity: .4 !important; }
 #lr-stage:not(.flat) .lr-bubble:not(.me) { cursor: pointer; } /* tıkla → odak */
+
+/* Faz 2 — yakınlık budaması: duyulamayan (uzak) kişi soluk + gri */
+.lr-bubble.out-of-range { opacity: .26 !important; filter: grayscale(.55); }
