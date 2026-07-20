@@ -20,8 +20,15 @@ function rtcConfig () {
 function _settings () { return (window.TurkuazSettings && TurkuazSettings.get()) || {} }
 function micConstraints (forceStandard = false) {
   const s = _settings()
+  // Stüdyo (yüksek kalite) modu: AEC + AGC kapalı → ham, temiz, pompalamayan ses.
+  // AEC kapalı olduğu için YALNIZ kulaklıkta güvenli (hoparlörde yankı yapar).
+  const hq = !!s.micHQ
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
-  const audio = { echoCancellation: true, noiseSuppression: forceStandard || (s.noise || 'standard') === 'standard', autoGainControl: true }
+  const audio = {
+    echoCancellation: !hq,
+    noiseSuppression: forceStandard || (s.noise || 'standard') === 'standard',
+    autoGainControl: !hq
+  }
   if (s.micId) audio.deviceId = { exact: s.micId }
   return { audio }
 }
@@ -249,16 +256,50 @@ const ZONES = [
 const ZONE_SAME = 1.15 // aynı bölge: net + hafif yüksek
 const ZONE_CROSS = 0.2 // farklı bölge: boğuk (duvar arkası hissi)
 
+// Adaptif ses bitrate'i: AZ kişide yüksek kalite (neredeyse şeffaf), kalabalıkta
+// mesh uplink'ini koru. Kalite katmanı — kimseyi zorlamaz, bant varken kullanır.
+function audioBitrate () {
+  const n = (window.Voice && Voice.members) ? Voice.members.size : 1
+  if (n <= 1) return 128000 // 1:1 — neredeyse şeffaf
+  if (n <= 3) return 96000
+  if (n <= 6) return 72000
+  return 56000 // kalabalık — toplam uplink'i tut
+}
 function tuneAudioSender (sender) {
   if (!sender || !sender.getParameters || !sender.setParameters) return
   try {
     const p = sender.getParameters()
     if (!p.encodings || !p.encodings.length) p.encodings = [{}]
-    // 10 kişide kişi başı 9 uplink: Opus kalitesini korurken toplam gönderimi
-    // ev bağlantılarında rahat tutan üst sınır.
-    p.encodings[0].maxBitrate = 64000
+    p.encodings[0].maxBitrate = audioBitrate()
     sender.setParameters(p).catch(() => {})
   } catch {}
+}
+
+// Opus SDP ince ayarı: FEC (kayıpta çıtırtı yok, gecikme maliyeti sıfır) + mono
+// (ses zaten mono, bant verimli). Ödünsüz kalite/sağlamlık kazancı. Güvenli:
+// hata olursa orijinal SDP döner.
+function tuneOpusSdp (sdp) {
+  try {
+    const rtp = sdp.match(/a=rtpmap:(\d+) opus\/48000/i)
+    if (!rtp) return sdp
+    const pt = rtp[1]
+    const fmtpRe = new RegExp('(a=fmtp:' + pt + ' )([^\\r\\n]*)')
+    if (fmtpRe.test(sdp)) {
+      return sdp.replace(fmtpRe, (all, pre, params) => {
+        let p = params
+        if (!/useinbandfec=/.test(p)) p += ';useinbandfec=1'
+        if (!/stereo=/.test(p)) p += ';stereo=0'
+        return pre + p
+      })
+    }
+    return sdp.replace(rtp[0], rtp[0] + '\r\na=fmtp:' + pt + ' minptime=10;useinbandfec=1;stereo=0')
+  } catch { return sdp }
+}
+// setLocalDescription() yerine: teklifi/yanıtı oluştur → Opus'u ayarla → uygula.
+async function setLocalMunged (pc, kind) {
+  const desc = kind === 'answer' ? await pc.createAnswer() : await pc.createOffer()
+  try { desc.sdp = tuneOpusSdp(desc.sdp) } catch {}
+  await pc.setLocalDescription(desc)
 }
 
 // Video göndericileri (kamera/ekran) için üst sınır: ses göndericisindeki
@@ -686,7 +727,7 @@ const Voice = {
       if (m.polite && !pc.remoteDescription) return
       try {
         m.makingOffer = true
-        await pc.setLocalDescription()
+        await setLocalMunged(pc, 'offer') // Opus FEC + mono
         this.sendRtc(m.code, { kind: 'sdp', desc: pc.localDescription })
       } catch (e) { console.error(e) } finally { m.makingOffer = false }
     }
@@ -1136,7 +1177,7 @@ const Voice = {
         try { await pc.addIceCandidate(cand || undefined) } catch {}
       }
       if (desc.type === 'offer') {
-        await pc.setLocalDescription()
+        await setLocalMunged(pc, 'answer') // Opus FEC + mono
         this.sendRtc(m.code, { kind: 'sdp', desc: pc.localDescription })
       }
     } catch (e) { console.error('sdp', e) }
@@ -1234,6 +1275,13 @@ const Voice = {
       mb.setAttribute('aria-label', mb.title)
     }
     this._audibleSoon() // üyelik/mod değişince budamayı tazele
+    if (this._lastTuneN !== this.members.size) { this._lastTuneN = this.members.size; this._retuneAudio() } // kişi sayısına göre bitrate
+  },
+  _retuneAudio () {
+    for (const m of this.members.values()) {
+      if (!m.pc || !m.pc.getSenders) continue
+      for (const s of m.pc.getSenders()) if (s.track && s.track.kind === 'audio') tuneAudioSender(s)
+    }
   },
 
   syncTheater (inRoomView) {
@@ -1525,7 +1573,7 @@ const CallMgr = {
       if (this.polite && !pc.remoteDescription) return
       try {
         this.makingOffer = true
-        await pc.setLocalDescription()
+        await setLocalMunged(pc, 'offer') // Opus FEC + mono
         this.sendRtc(this.peer, { kind: 'sdp', scope: 'call', desc: pc.localDescription })
       } catch (e) { console.error(e) } finally { this.makingOffer = false }
     }
@@ -1563,7 +1611,7 @@ const CallMgr = {
       if (collision && !this.polite) return
       await pc.setRemoteDescription(desc)
       if (desc.type === 'offer') {
-        await pc.setLocalDescription()
+        await setLocalMunged(pc, 'answer') // Opus FEC + mono
         this.sendRtc(this.peer, { kind: 'sdp', scope: 'call', desc: pc.localDescription })
       }
     } catch (e) { console.error('call sdp', e) }

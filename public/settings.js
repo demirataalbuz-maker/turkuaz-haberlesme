@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    vidCodec: 'auto', voiceMode: 'flat', theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -219,6 +219,16 @@
     sys.innerHTML = `Sistem: <b>${cores}</b> çekirdek · <b>${mem}</b> RAM. İki AI motoru da pakete dahil, indirme yok: <b>RNNoise</b> (hafif, sabit uğultuda iyi) ve <b>DeepFilterNet3</b> (16 MB, klavye/ani seslerde belirgin üstün). DeepFilterNet açılamazsa otomatik RNNoise'a düşülür.`
     gNoise.appendChild(sys)
     p.appendChild(gNoise)
+
+    // Ses kalitesi — stüdyo modu (AEC + AGC kapalı, ham temiz ses)
+    const gHQ = group('SES KALİTESİ')
+    const hqSwitch = document.createElement('label'); hqSwitch.className = 'set-switch'
+    const hqCb = document.createElement('input'); hqCb.type = 'checkbox'; hqCb.checked = !!settings.micHQ
+    hqCb.onchange = () => TurkuazSettings.set('micHQ', hqCb.checked)
+    hqSwitch.append(hqCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gHQ.appendChild(row('Stüdyo modu (yüksek kalite)', hqSwitch,
+      'Yankı engelleme + otomatik kazancı kapatır → ham, pompalamayan, temiz ses. YALNIZ KULAKLIKLA kullan — hoparlörde yankı yapar. Bir sonraki katılım/aramada geçerli.'))
+    p.appendChild(gHQ)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)
     const gVoice = group('SESLİ SOHBET MODU')
