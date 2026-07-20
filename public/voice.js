@@ -846,7 +846,7 @@ const Voice = {
     if (!wrap) {
       wrap = document.createElement('div'); wrap.className = 'lr-zones'
       for (const z of ZONES) {
-        const zd = document.createElement('div'); zd.className = 'lr-zone'; zd.dataset.zone = z.id
+        const zd = document.createElement('div'); zd.className = 'lr-zone'; zd.dataset.zone = z.id; zd.dataset.emoji = z.emoji
         zd.style.left = z.x + '%'; zd.style.top = z.y + '%'; zd.style.width = z.w + '%'; zd.style.height = z.h + '%'
         const lbl = document.createElement('span'); lbl.className = 'lr-zone-label'; lbl.textContent = z.emoji + ' ' + z.name
         zd.appendChild(lbl); wrap.appendChild(zd)
@@ -969,10 +969,18 @@ const Voice = {
     return dev
   },
   speakTick () {
-    if (this._myBubble) this._myBubble.classList.toggle('speaking', !this.muted && this._gateOpen !== false && this._level(this._myAnalyser) > 10)
+    const live = new Set() // hangi bölgelerde şu an konuşan var
+    const meSpeaking = !this.muted && this._gateOpen !== false && this._level(this._myAnalyser) > 10
+    if (this._myBubble) this._myBubble.classList.toggle('speaking', meSpeaking)
+    if (meSpeaking) { const z = this.zoneOf(this.myPos); if (z) live.add(z.id) }
     for (const m of this.members.values()) {
-      if (m.bubble) m.bubble.classList.toggle('speaking', this._level(m.analyser) > 10)
+      const sp = this._level(m.analyser) > 10
+      if (m.bubble) m.bubble.classList.toggle('speaking', sp)
+      if (sp && m.pos) { const z = this.zoneOf(m.pos); if (z) live.add(z.id) }
     }
+    // Mekân canlansın: içinde konuşan olan bölge ışıldar
+    const stage = this.el('lr-stage')
+    if (stage && !this.flat()) stage.querySelectorAll('.lr-zone').forEach(zd => zd.classList.toggle('live', live.has(zd.dataset.zone)))
   },
 
   async sampleStats () {

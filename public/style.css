@@ -972,3 +972,29 @@ button { font-family: inherit; }
 }
 .lr-zone.here { background: rgba(45, 212, 191, .10); border-color: rgba(45, 212, 191, .42); }
 .lr-zone.here .lr-zone-label { color: var(--tq); opacity: 1; }
+
+/* ================= Faz 3 — oda bir mekân ================= */
+/* zemin ızgarası: ufka doğru solar (derinlik/mekân hissi), konumsal modda */
+#lr-stage:not(.flat)::before {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 43px, rgba(94, 234, 212, .045) 43px 44px),
+    repeating-linear-gradient(0deg, transparent 0 43px, rgba(94, 234, 212, .032) 43px 44px);
+  -webkit-mask-image: linear-gradient(to top, #000 20%, transparent 90%);
+  mask-image: linear-gradient(to top, #000 20%, transparent 90%);
+}
+/* bölge kimlik renkleri (her alan farkli his verir) */
+.lr-zone[data-zone="sohbet"] { background: rgba(251, 191, 36, .05); border-color: rgba(251, 191, 36, .2); }
+.lr-zone[data-zone="oyun"] { background: rgba(139, 92, 246, .055); border-color: rgba(139, 92, 246, .22); }
+.lr-zone[data-zone="chill"] { background: rgba(14, 165, 233, .05); border-color: rgba(14, 165, 233, .2); }
+/* büyük soluk amblem (mekân dokusu) */
+.lr-zone::after {
+  content: attr(data-emoji); position: absolute; right: 12px; bottom: 8px;
+  font-size: 46px; line-height: 1; opacity: .07; pointer-events: none;
+}
+/* içinde bulunduğum bölge (Faz 2 .here — per-zone renklerini ezmesi için burada tekrar) */
+.lr-zone.here { background: rgba(45, 212, 191, .11); border-color: rgba(45, 212, 191, .45); }
+.lr-zone.here .lr-zone-label { color: var(--tq); opacity: 1; }
+/* içinde konuşan olan bölge canlanır (mekân yaşıyor) */
+.lr-zone.live { border-style: solid; box-shadow: inset 0 0 34px rgba(45, 212, 191, .11); }
+.lr-zone.live .lr-zone-label { color: var(--tq); opacity: 1; }
