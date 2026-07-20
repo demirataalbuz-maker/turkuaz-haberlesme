@@ -947,3 +947,10 @@ button { font-family: inherit; }
 #lr-stage.flat .lr-bubble { cursor: default; transition: left .3s ease, top .3s ease; }
 #lr-stage.flat .lr-bubble.me { cursor: default; }
 #btn-voicemode.on { color: var(--tq); }
+
+/* Faz 1 — görsel yakınlık (uzaktaki balon küçülür/soluklaşır) + konuşana odak */
+.lr-bubble { opacity: var(--prox-op, 1); transition: left .12s linear, top .12s linear, opacity .22s ease; }
+.lr-face { transform: scale(var(--prox, 1)); transition: box-shadow .15s, transform .22s ease; }
+.lr-bubble.focused .lr-face { box-shadow: 0 0 0 4px var(--tq), 0 6px 22px rgba(0, 0, 0, .55); }
+.lr-bubble.ducked { opacity: .4 !important; }
+#lr-stage:not(.flat) .lr-bubble:not(.me) { cursor: pointer; } /* tıkla → odak */

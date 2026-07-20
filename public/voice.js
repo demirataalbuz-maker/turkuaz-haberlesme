@@ -404,7 +404,21 @@ const Voice = {
     this._startGate() // konuşma moduna göre mikrofon kapısı
     this.joining = false
     if (window.toast) toast('Sesli sohbete bağlandın.', 'success')
+    this._maybeHeadphoneTip()
     this.sync()
+  },
+
+  // Konumsal moda ilk girişte (oturum başına bir kez, "bir daha gösterme"li)
+  // kulaklık öner — hoparlörde HRTF yön/mesafe hissi zayıflar.
+  _maybeHeadphoneTip () {
+    if (this.flat() || this._hpTipShown) return
+    this._hpTipShown = true
+    try { if (localStorage.getItem('turkuaz.hpTipHide') === '1') return } catch {}
+    setTimeout(() => {
+      if (!this.room || this.flat() || !window.toast) return
+      toast('🎧 Konumsal ses en iyi kulaklıkla — hoparlörde yön/mesafe zayıflar. İstersen Ayarlar\'dan 💬 Düz mod\'a geç.', 'info', 7000)
+      try { localStorage.setItem('turkuaz.hpTipHide', '1') } catch {} // bir kez göster, bir daha nag etme
+    }, 1200)
   },
 
   leave () {
@@ -427,6 +441,7 @@ const Voice = {
     this.joining = false
     this.myPos = null
     this._myBubble = null
+    this._focusCode = null
     this.sync()
   },
 
@@ -503,8 +518,26 @@ const Voice = {
   setMemberVolume (code, pct) {
     this.userVols()[code] = Number(pct)
     try { localStorage.setItem('turkuaz.uservol', JSON.stringify(this._userVols)) } catch {}
-    const m = this.members.get(code)
-    if (m && m.gain) m.gain.gain.value = Math.max(0, Number(pct) || 0) / 100
+    this.applyGains()
+  },
+
+  // ---- konuşana odak: bir kişiye tıkla → onu yükselt, ötekileri kıs ----
+  _focusCode: null,
+  applyGains () {
+    for (const m of this.members.values()) {
+      if (!m.gain) continue
+      const base = this.memberVol(m.code)
+      const f = this._focusCode ? (m.code === this._focusCode ? 1.35 : 0.18) : 1
+      m.gain.gain.setTargetAtTime(base * f, this.ctx ? this.ctx.currentTime : 0, 0.08)
+    }
+  },
+  toggleFocus (code) {
+    this._focusCode = this._focusCode === code ? null : code
+    this.applyGains()
+    for (const m of this.members.values()) {
+      if (m.bubble) m.bubble.classList.toggle('focused', this._focusCode === m.code)
+      if (m.bubble) m.bubble.classList.toggle('ducked', !!this._focusCode && this._focusCode !== m.code)
+    }
   },
   showVolPopover (code, bubbleEl) {
     const old = this.el('lr-volpop'); if (old) old.remove()
@@ -702,6 +735,7 @@ const Voice = {
       m.gain.connect(this.master)
       this.routeMember(m) // konumsal (panner) ya da düz (panner bypass) — moda göre
       this.updatePanner(m)
+      this.applyGains() // odak aktifse yeni üye de doğru seviyeye otursun
     }
     m.video = !!(main && main.getVideoTracks().some(t => t.readyState === 'live'))
     this.updateBubble(m)
@@ -719,6 +753,7 @@ const Voice = {
     if (m.audioEl) { m.audioEl.srcObject = null; m.audioEl = null }
     if (m.bubble) m.bubble.remove()
     this.members.delete(code)
+    if (this._focusCode === code) { this._focusCode = null; this.applyGains() } // odaktaki ayrıldı
     this.sync()
   },
 
@@ -730,6 +765,7 @@ const Voice = {
     m.panner.positionZ.setTargetAtTime((m.pos.y - this.myPos.y) / LR_SCALE, t, 0.05)
   },
   updateAllPanners () { for (const m of this.members.values()) this.updatePanner(m) },
+  updateAllProximity () { for (const m of this.members.values()) this.applyProximity(m) },
 
   // ---- sesli sohbet modu: 'spatial' (oturma odası, HRTF) | 'flat' (düz, eşit seviye) ----
   flat () { return (_settings().voiceMode || 'spatial') === 'flat' },
@@ -1119,7 +1155,12 @@ const Voice = {
     b.innerHTML = face + '<div class="lr-name"></div>'
     this.el('lr-stage').appendChild(b)
     if (mine) this.makeDraggable(b)
-    else b.addEventListener('contextmenu', (e) => { e.preventDefault(); this.showVolPopover(code, b) })
+    else {
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); this.showVolPopover(code, b) })
+      // tek tık → konuşana odak (onu yükselt, ötekileri kıs). Sahneye sızıp
+      // "oraya git"i tetiklemesin diye durdur.
+      b.addEventListener('click', (e) => { e.stopPropagation(); this.toggleFocus(code) })
+    }
     // çift tıkla → kamerayı/görüntüyü tam ekran
     b.addEventListener('dblclick', () => {
       const v = b.querySelector('video')
@@ -1148,6 +1189,17 @@ const Voice = {
     face.classList.toggle('has-video', m.video)
     if (m.video && main && vid.srcObject !== main) vid.srcObject = main
     if (!m.video) vid.srcObject = null
+    this.applyProximity(m)
+  },
+  // Görsel yakınlık ipucu: konumsal modda uzaktaki balon küçülüp soluklaşır
+  // (sesin kısılmasını gözle eşler). Düz modda hepsi eşit.
+  applyProximity (m) {
+    if (!m.bubble) return
+    if (this.flat() || !this.myPos || !m.pos) { m.bubble.style.setProperty('--prox', '1'); m.bubble.style.setProperty('--prox-op', '1'); return }
+    const d = Math.hypot(m.pos.x - this.myPos.x, m.pos.y - this.myPos.y)
+    const t = Math.min(1, d / 70) // 0 (bitişik) → 1 (uzak)
+    m.bubble.style.setProperty('--prox', (1 - t * 0.32).toFixed(3)) // 1.0 → 0.68 ölçek
+    m.bubble.style.setProperty('--prox-op', (1 - t * 0.42).toFixed(3)) // 1.0 → 0.58 saydamlık
   },
 
   _myBubble: null,
@@ -1180,6 +1232,7 @@ const Voice = {
         b.style.left = this.myPos.x + '%'
         b.style.top = this.myPos.y + '%'
         this.updateAllPanners()
+        this.updateAllProximity() // ben hareket edince herkesin bana uzaklığı değişir
         this.sendPos()
       }
       const up = () => {
@@ -1566,6 +1619,23 @@ document.addEventListener('DOMContentLoaded', () => {
   Voice.el('btn-cam').onclick = () => Voice.toggleCam()
   Voice.el('btn-screen').onclick = () => Voice.toggleScreen()
   Voice.el('btn-voicemode').onclick = () => Voice.setVoiceMode(Voice.flat() ? 'spatial' : 'flat')
+  // Boş sahneye tıkla/dokun → oraya git (mobilde sürüklemekten kolay; masaüstünde de çalışır).
+  // Balona tıklama odak yaptığı için (stopPropagation) buraya düşmez.
+  Voice.el('btn-voice-leave') && (function () {
+    const stage = Voice.el('lr-stage')
+    if (!stage) return
+    stage.addEventListener('click', (e) => {
+      if (!Voice.room || Voice.flat() || e.target.closest('.lr-bubble')) return
+      const r = stage.getBoundingClientRect()
+      if (r.width < 10) return
+      Voice.myPos = Voice.resolveCollision({
+        x: Math.min(96, Math.max(4, ((e.clientX - r.left) / r.width) * 100)),
+        y: Math.min(88, Math.max(10, ((e.clientY - r.top) / r.height) * 100))
+      })
+      if (Voice._myBubble) { Voice._myBubble.style.left = Voice.myPos.x + '%'; Voice._myBubble.style.top = Voice.myPos.y + '%' }
+      Voice.updateAllPanners(); Voice.updateAllProximity(); Voice.sendPos(); Voice.sendState()
+    })
+  })()
   Voice.el('voice-dock-return').onclick = () => {
     const room = state.rooms.find(r => r.topic === Voice.room)
     if (room && typeof openRoom === 'function') openRoom(room)
