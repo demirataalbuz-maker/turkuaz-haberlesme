@@ -238,6 +238,9 @@ const AUDIBLE_IN = 40  // sahne-yüzdesi mesafesi: bu altına gelince duyulmaya 
 const AUDIBLE_OUT = 52 // bu üstüne çıkınca kesilir (histerezis — sınırda titremesin)
 // Faz 2 — isimli bölgeler (sahnede sabit alanlar; konum senkron olduğu için
 // herkes aynı bölgeleri ve kimin nerede olduğunu hesaplar — yeni protokol yok).
+// ŞİMDİLİK RAFTA: kafa karıştırıcı bulundu. true yapınca tüm bölge mantığı
+// (çizim + ses çarpanı + bölge-bazlı duyulurluk) geri gelir; kod korunuyor.
+const ZONES_ON = false
 const ZONES = [
   { id: 'sohbet', name: 'Sohbet', emoji: '☕', x: 5, y: 12, w: 40, h: 36 },
   { id: 'oyun', name: 'Oyun', emoji: '🎮', x: 55, y: 12, w: 40, h: 36 },
@@ -822,7 +825,7 @@ const Voice = {
 
   // ---- Faz 2: isimli bölgeler ----
   zoneOf (pos) {
-    if (!pos) return null
+    if (!ZONES_ON || !pos) return null // raftayken bölge yok → zoneFactor 1, saf mesafe
     for (const z of ZONES) if (pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h) return z
     return null
   },
@@ -841,6 +844,7 @@ const Voice = {
     const hint = document.querySelector('#lr-controls .lr-hint')
     if (!hint) return
     if (this.flat()) { hint.textContent = 'Düz mod — herkes eşit seviyede'; return }
+    if (!ZONES_ON) { hint.textContent = 'Balonunu sürükle — sesler bulunduğun yönden gelir'; return }
     const z = this.zoneOf(this.myPos)
     hint.textContent = z
       ? z.emoji + ' ' + z.name + ' bölgesindesin — aynı bölgedekiler net gelir'
@@ -849,6 +853,7 @@ const Voice = {
   renderZones () {
     const stage = this.el('lr-stage')
     if (!stage) return
+    if (!ZONES_ON) { stage.querySelectorAll('.lr-zones').forEach(z => z.remove()); return } // rafta: çizme
     let wrap = stage.querySelector('.lr-zones')
     if (!wrap) {
       wrap = document.createElement('div'); wrap.className = 'lr-zones'

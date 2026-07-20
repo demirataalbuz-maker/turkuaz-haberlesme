@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    vidCodec: 'auto', voiceMode: 'spatial', theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'flat', theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -224,13 +224,13 @@
     const gVoice = group('SESLİ SOHBET MODU')
     gVoice.appendChild(row('Mod',
       selectEl([
-        { value: 'spatial', label: 'Konumsal — oturma odası (HRTF)' },
-        { value: 'flat', label: 'Düz konuşma — herkes eşit' }
-      ], settings.voiceMode || 'spatial', v => {
+        { value: 'flat', label: 'Düz konuşma — herkes eşit (varsayılan)' },
+        { value: 'spatial', label: 'Konumsal — oturma odası (HRTF, isteğe bağlı)' }
+      ], settings.voiceMode || 'flat', v => {
         TurkuazSettings.set('voiceMode', v)
         if (window.Voice && Voice.room) Voice.setVoiceMode(v) // odadaysan anında geç
       }),
-      'Konumsal: balonunu sürükle, sesler yönünden gelir (kulaklık önerilir). Düz: normal grup araması, herkes eşit seviyede. Anında geçerli.'))
+      'Düz: normal grup araması, herkes eşit seviyede — varsayılan. Konumsal: balonunu sürükle, sesler yönünden gelir (kulaklık önerilir). Anında geçerli.'))
     p.appendChild(gVoice)
 
     // Konuşma modu (açık / ses etkinliği / bas-konuş)
