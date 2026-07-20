@@ -877,3 +877,19 @@ button { font-family: inherit; }
 
 /* Arama kaydı: mesaj balonu değil, ortalanmış sistem satırı */
 .sys-row { text-align: center; color: var(--tx3); font-size: 12px; margin: 10px 0; user-select: none; }
+
+/* Sesli mesaj */
+#btn-voicemsg {
+  min-width: 40px; height: 40px; border-radius: 20px; flex-shrink: 0; padding: 0 10px;
+  background: var(--bg1); border: 1px solid var(--line); color: var(--tx2);
+  font-size: 18px; cursor: pointer; white-space: nowrap;
+}
+#btn-voicemsg:hover { border-color: var(--tq); }
+#btn-voicemsg.rec {
+  color: #fff; background: #b3324a; border-color: #b3324a;
+  font-size: 13px; font-weight: 700; animation: pulse 1.6s infinite;
+}
+.msg-audio-wrap { display: flex; flex-direction: column; gap: 2px; max-width: 340px; }
+.msg-audio { width: 100%; height: 40px; }
+.msg-audio-name { color: var(--tx3); font-size: 12px; padding-left: 2px; }
+@media (max-width: 760px) { #btn-voicemsg { min-width: 38px; height: 38px; } }

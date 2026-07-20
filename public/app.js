@@ -617,6 +617,8 @@ function onFileData (m) {
       img.src = dataUrl
       img.onclick = () => window.open(dataUrl)
       el.replaceWith(img)
+    } else if ((m.mime || '').startsWith('audio/') && el.tagName === 'AUDIO') {
+      el.src = dataUrl // mobil: HTTP yok, sesli mesaj data-URL'den çalınır
     }
   })
 }
@@ -624,6 +626,10 @@ function onFileData (m) {
 function fileHTML (m) {
   const f = m.file
   const url = '/files/' + f.fid
+  if ((f.mime || '').startsWith('audio/')) {
+    return `<div class="msg-audio-wrap"><audio class="msg-audio" controls preload="metadata" src="${url}" data-fid="${f.fid}" data-from="${m.from}"></audio>
+      <span class="msg-audio-name">🎤 ${esc(f.fname.replace(/\.[a-z0-9]+$/i, ''))} · ${fmtSize(f.size || 0)}</span></div>`
+  }
   if ((f.mime || '').startsWith('image/')) {
     return `<img class="msg-img" src="${url}" data-fid="${f.fid}" data-from="${m.from}" alt="${esc(f.fname)}"
       onerror="this.outerHTML='<div class=&quot;file-missing&quot; data-fid=&quot;${f.fid}&quot; data-from=&quot;${m.from}&quot;>📥 ${esc(f.fname)} — içeriği getirmek için tıkla</div>'">`
@@ -1070,6 +1076,80 @@ function sendFileToActive (f) {
   }
   rd.readAsDataURL(f)
 }
+// ---- sesli mesaj ----
+// 🎤 tıkla → kayıt başlar (buton kırmızı, süre sayar); tekrar tıkla → gönderilir;
+// Esc → iptal. Opus/WebM ~32 kbps: 60 sn ≈ 240 KB, mevcut dosya kanalından gider.
+let vmRec = null
+const VM_MAX_MS = 60 * 1000
+function vmUpdateButton () {
+  const b = $('btn-voicemsg')
+  if (!vmRec) { b.textContent = '🎤'; b.classList.remove('rec'); return }
+  const s = Math.floor((Date.now() - vmRec.t0) / 1000)
+  b.textContent = '⏹ ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0')
+  b.classList.add('rec')
+}
+function vmStop (cancelled) {
+  if (!vmRec) return
+  vmRec.cancelled = cancelled
+  clearInterval(vmRec.timer)
+  document.removeEventListener('keydown', vmRec.esc, true)
+  try { vmRec.mr.stop() } catch {}
+}
+$('btn-voicemsg').onclick = async () => {
+  if (vmRec) { vmStop(false); return }
+  if (!activeConv) return
+  let stream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+  } catch (e) {
+    if (window.toast) toast('Mikrofona erişilemedi: ' + e.message, 'error', 5000)
+    return
+  }
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm'
+  let mr
+  try { mr = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 }) } catch (e) {
+    stream.getTracks().forEach(t => t.stop())
+    if (window.toast) toast('Kayıt başlatılamadı: ' + e.message, 'error', 5000)
+    return
+  }
+  const rec = { mr, chunks: [], t0: Date.now(), conv: activeConv, cancelled: false }
+  rec.esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); vmStop(true) } }
+  mr.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data) }
+  mr.onstop = () => {
+    stream.getTracks().forEach(t => t.stop())
+    vmRec = null
+    vmUpdateButton()
+    if (rec.cancelled) return
+    const secs = Math.max(1, Math.round((Date.now() - rec.t0) / 1000))
+    const blob = new Blob(rec.chunks, { type: mimeType })
+    if (blob.size < 1500) { if (window.toast) toast('Kayıt çok kısa.', 'warn', 3000); return }
+    if (blob.size > 8 * 1024 * 1024) { if (window.toast) toast('Kayıt 8 MB sınırını aştı.', 'error', 4000); return }
+    const rd = new FileReader()
+    rd.onload = () => {
+      const data = String(rd.result).split(',')[1]
+      // mime'ı ';codecs=...' olmadan yolla: sunucu inline allowlist'i tam eşleşme arar
+      const base = {
+        t: 'send-file',
+        fname: 'Sesli mesaj ' + Math.floor(secs / 60) + '.' + String(secs % 60).padStart(2, '0') + '.webm',
+        mime: 'audio/webm',
+        data
+      }
+      if (rec.conv.type === 'dm') send({ ...base, code: rec.conv.code })
+      else send({ ...base, room: rec.conv.topic, ch: activeCh(rec.conv.topic) })
+    }
+    rd.readAsDataURL(blob)
+  }
+  vmRec = rec
+  rec.timer = setInterval(() => {
+    vmUpdateButton()
+    if (Date.now() - rec.t0 >= VM_MAX_MS) { vmStop(false); if (window.toast) toast('60 sn sınırına ulaşıldı, gönderildi.', 'info', 3000) }
+  }, 500)
+  document.addEventListener('keydown', rec.esc, true)
+  mr.start(250)
+  vmUpdateButton()
+  if (window.toast) toast('Kayıt başladı — 🎤 tekrar tıkla: gönder · Esc: iptal', 'info', 3500)
+}
+
 $('messages').addEventListener('dragover', e => e.preventDefault())
 $('messages').addEventListener('drop', e => {
   e.preventDefault()

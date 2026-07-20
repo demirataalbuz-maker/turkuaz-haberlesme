@@ -21,7 +21,10 @@ fs.mkdirSync(TMP, { recursive: true })
 // electron paketi binary'yi artık postinstall'da değil ilk çalıştırmada indiriyor;
 // iki instance aynı anda tetikleyince indirme yarışı ETXTBSY ile öldürüyor (CI v0.4.4).
 // Binary eksikse burada tek başına indirt, sonra instance'ları başlat.
-spawnSync(path.join(ROOT, 'node_modules/.bin/electron'), ['--version'], { cwd: ROOT, stdio: 'ignore' })
+// Windows'ta .bin/electron POSIX shim'dir, doğrudan spawn edilemez → .cmd kullan
+const ELECTRON_BIN = path.join(ROOT, 'node_modules/.bin/electron' + (process.platform === 'win32' ? '.cmd' : ''))
+const SPAWN_OPTS_EXTRA = process.platform === 'win32' ? { shell: true } : {}
+spawnSync(ELECTRON_BIN, ['--version'], { cwd: ROOT, stdio: 'ignore', ...SPAWN_OPTS_EXTRA })
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const children = []
@@ -32,7 +35,8 @@ function cleanup (code) {
 function fail (msg) { console.error('FAIL:', msg); cleanup(1) }
 
 function startApp (label, port, dbgPort) {
-  const child = spawn(path.join(ROOT, 'node_modules/.bin/electron'), ['.', '--remote-debugging-port=' + dbgPort, '--no-sandbox'], {
+  const child = spawn(ELECTRON_BIN, ['.', '--remote-debugging-port=' + dbgPort, '--no-sandbox'], {
+    ...SPAWN_OPTS_EXTRA,
     cwd: ROOT,
     detached: true,
     env: {
