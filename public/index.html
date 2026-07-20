@@ -38,22 +38,27 @@
       </button>
     </header>
     <div id="sidebar-body">
-      <div class="section-title"><span>KODUM</span></div>
-      <div id="my-code-box">
-        <code id="my-code">...</code>
-        <button class="icon-button" id="btn-copy-code" title="Kopyala" aria-label="Arkadaş kodunu kopyala"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></button>
+      <!-- Ana sayfa görünümü: kod + arkadaşlar + DM'ler (oda seçili değilken) -->
+      <div id="sidebar-home">
+        <div class="section-title"><span>KODUM</span></div>
+        <div id="my-code-box">
+          <code id="my-code">...</code>
+          <button class="icon-button" id="btn-copy-code" title="Kopyala" aria-label="Arkadaş kodunu kopyala"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></button>
+        </div>
+        <div class="section-title"><span>ARKADAŞ EKLE</span></div>
+        <div id="add-friend-row">
+          <input id="friend-code-input" placeholder="arkadaş kodunu yapıştır" spellcheck="false">
+          <button id="btn-add-friend">Ekle</button>
+        </div>
+        <div id="requests-wrap">
+          <div class="section-title"><span>GELEN İSTEKLER</span></div>
+          <div id="requests"></div>
+        </div>
+        <div class="section-title"><span>DİREKT MESAJLAR</span></div>
+        <div id="dm-list"></div>
       </div>
-      <div class="section-title"><span>ARKADAŞ EKLE</span></div>
-      <div id="add-friend-row">
-        <input id="friend-code-input" placeholder="arkadaş kodunu yapıştır" spellcheck="false">
-        <button id="btn-add-friend">Ekle</button>
-      </div>
-      <div id="requests-wrap">
-        <div class="section-title"><span>GELEN İSTEKLER</span></div>
-        <div id="requests"></div>
-      </div>
-      <div class="section-title"><span>DİREKT MESAJLAR</span></div>
-      <div id="dm-list"></div>
+      <!-- Oda görünümü: Discord-tarzı dikey kanal listesi (oda seçiliyken) -->
+      <div id="sidebar-room" class="hidden" aria-label="Oda kanalları"></div>
     </div>
     <section id="voice-dock" class="hidden" aria-label="Aktif sesli sohbet" aria-live="polite">
       <button id="voice-dock-return" class="voice-dock-main" type="button" title="Sesli odaya dön">

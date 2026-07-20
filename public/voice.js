@@ -993,6 +993,7 @@ const Voice = {
 
   sync () {
     this.syncConnectionUI()
+    if (window.refreshSidebarRoom) window.refreshSidebarRoom() // ses kanalı katılımcı listesi canlı
     const lr = this.el('livingroom')
     if (!lr) return
     const inRoomView = activeConv && activeConv.type === 'room'

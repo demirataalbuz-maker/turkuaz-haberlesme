@@ -630,3 +630,54 @@ button.screen-opt { padding: 0; color: var(--tx); text-align: left; font: inheri
     outline: 2px solid CanvasText !important; outline-offset: 2px;
   }
 }
+
+/* ================= Discord-tarzı oda kanal listesi (#sidebar-room) ================= */
+#channel-tabs { display: none; } /* eski yatay sekmeler kaldırıldı; kanallar artık sidebar'da */
+.sr-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line);
+}
+.sr-name {
+  font-weight: 800; font-size: 15px; color: var(--tx);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+}
+.ch-group { margin-top: 12px; }
+.ch-group-title {
+  display: flex; align-items: center; justify-content: space-between;
+  color: var(--tx3); letter-spacing: .8px; font-size: 11px; font-weight: 700;
+  padding: 4px 6px; text-transform: uppercase;
+}
+.ch-add-mini {
+  width: 20px; height: 20px; border: 0; background: transparent; color: var(--tx3);
+  font-size: 18px; line-height: 1; cursor: pointer; border-radius: 5px;
+}
+.ch-add-mini:hover { color: var(--tx); background: color-mix(in srgb, var(--bg3) 70%, transparent); }
+.ch-row, .vc-row {
+  position: relative; display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; margin: 1px 0; border-radius: 8px; cursor: pointer;
+  color: var(--tx3); font-size: 14px; transition: background .12s, color .12s;
+}
+.ch-row:hover, .vc-row:hover { background: color-mix(in srgb, var(--bg3) 60%, transparent); color: var(--tx2); }
+.ch-row.has-unread { color: var(--tx); }
+.ch-row.has-unread::before {
+  content: ""; position: absolute; left: -4px; top: 50%; transform: translateY(-50%);
+  width: 4px; height: 8px; border-radius: 0 4px 4px 0; background: var(--tx);
+}
+.ch-row.active { background: color-mix(in srgb, var(--tq) 20%, transparent); color: var(--tx); }
+.ch-hash { color: var(--tx3); font-weight: 600; }
+.ch-row.active .ch-hash { color: var(--tq); }
+.ch-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: #e23b52; color: #fff; font-size: 11px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.vc-row.joined { color: var(--tq); background: color-mix(in srgb, var(--tq) 12%, transparent); }
+.vc-ic { font-size: 13px; }
+.vc-count { margin-left: auto; color: var(--tx3); font-size: 12px; font-weight: 700; }
+.vc-members { margin: 2px 0 6px 12px; padding-left: 9px; border-left: 2px solid var(--line); }
+.vc-member { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 7px; }
+.vc-member:hover { background: color-mix(in srgb, var(--bg3) 50%, transparent); }
+.vc-member .avatar { width: 24px; height: 24px; min-width: 24px; font-size: 12px; }
+.vc-mname { flex: 1; font-size: 13px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-mute { font-size: 11px; opacity: .85; }
