@@ -236,6 +236,15 @@ const VOICE_STATS_MS = 4000
 const PRUNE_MIN = 12   // bu kişi sayısının ALTINDA budama YOK (herkes birbirini duyar)
 const AUDIBLE_IN = 40  // sahne-yüzdesi mesafesi: bu altına gelince duyulmaya başlar
 const AUDIBLE_OUT = 52 // bu üstüne çıkınca kesilir (histerezis — sınırda titremesin)
+// Faz 2 — isimli bölgeler (sahnede sabit alanlar; konum senkron olduğu için
+// herkes aynı bölgeleri ve kimin nerede olduğunu hesaplar — yeni protokol yok).
+const ZONES = [
+  { id: 'sohbet', name: 'Sohbet', emoji: '☕', x: 5, y: 12, w: 40, h: 36 },
+  { id: 'oyun', name: 'Oyun', emoji: '🎮', x: 55, y: 12, w: 40, h: 36 },
+  { id: 'chill', name: 'Chill', emoji: '🎧', x: 30, y: 60, w: 40, h: 32 }
+]
+const ZONE_SAME = 1.15 // aynı bölge: net + hafif yüksek
+const ZONE_CROSS = 0.2 // farklı bölge: boğuk (duvar arkası hissi)
 
 function tuneAudioSender (sender) {
   if (!sender || !sender.getParameters || !sender.setParameters) return
@@ -532,7 +541,8 @@ const Voice = {
       if (!m.gain) continue
       const base = this.memberVol(m.code)
       const f = this._focusCode ? (m.code === this._focusCode ? 1.35 : 0.18) : 1
-      m.gain.gain.setTargetAtTime(base * f, this.ctx ? this.ctx.currentTime : 0, 0.08)
+      const z = this.zoneFactor(m) // aynı bölge net, farklı bölge boğuk
+      m.gain.gain.setTargetAtTime(base * f * z, this.ctx ? this.ctx.currentTime : 0, 0.08)
     }
   },
   toggleFocus (code) {
@@ -780,14 +790,20 @@ const Voice = {
   _micTrack () { return this.mic ? (this.mic.getAudioTracks()[0] || null) : null },
   updateAudible () {
     const crowded = this.members.size >= PRUNE_MIN && !this.flat() && !!this.myPos
+    const myZone = crowded ? this.zoneOf(this.myPos) : null
     for (const m of this.members.values()) {
       let on = true
       if (crowded && m.pos) {
-        const d = Math.hypot(m.pos.x - this.myPos.x, m.pos.y - this.myPos.y)
-        on = (m._audible !== false) ? d <= AUDIBLE_OUT : d <= AUDIBLE_IN
+        const mz = this.zoneOf(m.pos)
+        if (myZone && mz && myZone.id === mz.id) on = true // aynı bölge → mesafeye bakmadan duyulur
+        else {
+          const d = Math.hypot(m.pos.x - this.myPos.x, m.pos.y - this.myPos.y)
+          on = (m._audible !== false) ? d <= AUDIBLE_OUT : d <= AUDIBLE_IN
+        }
       }
       this._setAudible(m, on)
     }
+    this.applyGains() // bölge çarpanları konuma bağlı → hareket sonrası tazele
   },
   _setAudible (m, on) {
     if (m._audible === on) return
@@ -796,6 +812,52 @@ const Voice = {
     if (m.bubble) m.bubble.classList.toggle('out-of-range', !on)
   },
   _audibleSoon () { clearTimeout(this._audTimer); this._audTimer = setTimeout(() => this.updateAudible(), 140) },
+
+  // ---- Faz 2: isimli bölgeler ----
+  zoneOf (pos) {
+    if (!pos) return null
+    for (const z of ZONES) if (pos.x >= z.x && pos.x <= z.x + z.w && pos.y >= z.y && pos.y <= z.y + z.h) return z
+    return null
+  },
+  // Ses çarpanı: aynı bölge net/yüksek, farklı bölge boğuk, açık alan nötr (mesafe)
+  zoneFactor (m) {
+    if (this.flat() || !this.myPos || !m.pos) return 1
+    const mine = this.zoneOf(this.myPos); const theirs = this.zoneOf(m.pos)
+    if (mine && theirs) return mine.id === theirs.id ? ZONE_SAME : ZONE_CROSS
+    return 1 // biri/ikisi açık alanda ("koridor") → saf mesafe
+  },
+  // Sahnedeki sabit bölge kutularını (balonların arkasına) bir kez çiz, konumsal
+  // modda göster; içinde bulunduğum bölgeyi vurgula.
+  // Bölge kutularını çiz + hangi bölgedeysem ipucunu güncelle (canlı, sürüklerken de)
+  _syncZoneHint () {
+    this.renderZones()
+    const hint = document.querySelector('#lr-controls .lr-hint')
+    if (!hint) return
+    if (this.flat()) { hint.textContent = 'Düz mod — herkes eşit seviyede'; return }
+    const z = this.zoneOf(this.myPos)
+    hint.textContent = z
+      ? z.emoji + ' ' + z.name + ' bölgesindesin — aynı bölgedekiler net gelir'
+      : 'Bir bölgeye gir → orası net; farklı bölge boğuk, açık alan mesafeye göre'
+  },
+  renderZones () {
+    const stage = this.el('lr-stage')
+    if (!stage) return
+    let wrap = stage.querySelector('.lr-zones')
+    if (!wrap) {
+      wrap = document.createElement('div'); wrap.className = 'lr-zones'
+      for (const z of ZONES) {
+        const zd = document.createElement('div'); zd.className = 'lr-zone'; zd.dataset.zone = z.id
+        zd.style.left = z.x + '%'; zd.style.top = z.y + '%'; zd.style.width = z.w + '%'; zd.style.height = z.h + '%'
+        const lbl = document.createElement('span'); lbl.className = 'lr-zone-label'; lbl.textContent = z.emoji + ' ' + z.name
+        zd.appendChild(lbl); wrap.appendChild(zd)
+      }
+      stage.insertBefore(wrap, stage.firstChild)
+    }
+    const flat = this.flat()
+    wrap.classList.toggle('hidden', flat)
+    const mine = flat ? null : this.zoneOf(this.myPos)
+    wrap.querySelectorAll('.lr-zone').forEach(zd => zd.classList.toggle('here', !!mine && zd.dataset.zone === mine.id))
+  },
 
   // ---- sesli sohbet modu: 'spatial' (oturma odası, HRTF) | 'flat' (düz, eşit seviye) ----
   flat () { return (_settings().voiceMode || 'spatial') === 'flat' },
@@ -1119,6 +1181,7 @@ const Voice = {
         ? 'İçeride: ' + inside.join(', ')
         : 'Henüz kimse yok — ilk katılan sen ol'
       this.el('lr-stage').querySelectorAll('.lr-bubble').forEach(b => b.remove())
+      this.el('lr-stage').querySelectorAll('.lr-zones').forEach(z => z.remove()) // bölgeleri de kaldır
       this._myBubble = null
       return
     }
@@ -1142,10 +1205,7 @@ const Voice = {
     const stage = this.el('lr-stage')
     if (stage) stage.classList.toggle('flat', flat)
     if (flat) this.arrangeFlatGrid()
-    const hint = document.querySelector('#lr-controls .lr-hint')
-    if (hint) hint.textContent = flat
-      ? 'Düz mod — herkes eşit seviyede'
-      : 'Balonunu sürükle — sesler bulunduğun yönden gelir'
+    this._syncZoneHint()
     const mb = this.el('btn-voicemode')
     if (mb) {
       mb.textContent = flat ? '🎧 Konumsal' : '💬 Düz mod'
@@ -1267,6 +1327,7 @@ const Voice = {
         this.updateAllPanners()
         this.updateAllProximity() // ben hareket edince herkesin bana uzaklığı değişir
         this._audibleSoon()
+        this._syncZoneHint() // hangi bölgedeyim → vurgu + ipucu canlı
         this.sendPos()
       }
       const up = () => {
@@ -1667,7 +1728,7 @@ document.addEventListener('DOMContentLoaded', () => {
         y: Math.min(88, Math.max(10, ((e.clientY - r.top) / r.height) * 100))
       })
       if (Voice._myBubble) { Voice._myBubble.style.left = Voice.myPos.x + '%'; Voice._myBubble.style.top = Voice.myPos.y + '%' }
-      Voice.updateAllPanners(); Voice.updateAllProximity(); Voice._audibleSoon(); Voice.sendPos(); Voice.sendState()
+      Voice.updateAllPanners(); Voice.updateAllProximity(); Voice._audibleSoon(); Voice._syncZoneHint(); Voice.sendPos(); Voice.sendState()
     })
   })()
   Voice.el('voice-dock-return').onclick = () => {
