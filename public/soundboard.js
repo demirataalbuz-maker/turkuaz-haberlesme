@@ -117,9 +117,29 @@
     }
   ]
 
+  // ---- kullanıcının kendi sesleri (#19) ----
+  // localStorage'da küçük ses klipleri (data-URL). Tetiklenince olay içinde INLINE
+  // gider (≤~64KB), herkes duyar. GÜVENLİK: yalnız data:audio/* base64 kabul;
+  // decodeAudioData script çalıştıramaz ama şema+boyut yine doğrulanır (DoS).
+  const CUSTOM_KEY = 'turkuaz.sounds'
+  function loadCustom () { try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]') } catch { return [] } }
+  function saveCustom (list) { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)) } catch {} }
+  function validSoundData (d) { return typeof d === 'string' && /^data:audio\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i.test(d) && d.length <= 90000 }
+  const _decodeCache = {}
+  async function playData (dataUrl) {
+    if (!validSoundData(dataUrl)) return false
+    const c = await readyContext()
+    let buf = _decodeCache[dataUrl]
+    if (!buf) { buf = await c.decodeAudioData(await (await fetch(dataUrl)).arrayBuffer()); _decodeCache[dataUrl] = buf }
+    const src = c.createBufferSource(); src.buffer = buf; src.connect(master(c)); src.start()
+    return true
+  }
+
   const Soundboard = {
     sounds: SOUNDS,
     play (id) {
+      const custom = loadCustom().find(x => x.id === id)
+      if (custom) return playData(custom.data).catch(() => false)
       const s = SOUNDS.find(x => x.id === id)
       if (!s) return Promise.resolve(false)
       return readyContext().then(c => {
@@ -132,19 +152,36 @@
       return ctx ? applySink(ctx, desiredSink) : Promise.resolve(true)
     },
     _last: 0,
-    remote (id) { // uzaktan gelen — basit sel önlemi
+    remote (id, data) { // uzaktan gelen — basit sel önlemi
       const now = Date.now()
       if (now - this._last < 250) return
       this._last = now
+      if (data && validSoundData(data)) { playData(data).catch(() => {}); return } // özel ses inline
       this.play(id)
     },
     trigger (id) { // yerelde çal + sesli sohbettekilere gönder
       this.play(id)
+      const custom = loadCustom().find(x => x.id === id)
+      const data = custom && validSoundData(custom.data) ? custom.data : undefined
       if (window.Voice && Voice.room) {
-        send({ t: 'room-ev', room: Voice.room, ev: { kind: 'sndpad', id } })
+        send({ t: 'room-ev', room: Voice.room, ev: data ? { kind: 'sndpad', id, data } : { kind: 'sndpad', id } })
       } else if (window.CallMgr && CallMgr.state === 'active' && CallMgr.peer) {
-        send({ t: 'rtc', to: CallMgr.peer, data: { kind: 'call-snd', scope: 'call', id } })
+        send({ t: 'rtc', to: CallMgr.peer, data: data ? { kind: 'call-snd', scope: 'call', id, data } : { kind: 'call-snd', scope: 'call', id } })
       }
+    },
+    addCustom (btn) {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'audio/*'
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return
+        if (f.size > 64000) { if (window.toast) toast('Ses çok büyük — en fazla ~64KB (kısa klip)', 'error', 5000); return }
+        const data = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => res(''); r.readAsDataURL(f) })
+        if (!validSoundData(data)) { if (window.toast) toast('Ses okunamadı ya da çok büyük', 'error'); return }
+        const base = f.name.replace(/\.[^.]+$/, '').slice(0, 20)
+        const label = (window.askText ? await window.askText('Ses adı', base, { okLabel: 'Ekle', maxlen: 20 }) : base) || base || 'Ses'
+        const list = loadCustom(); list.push({ id: 'c' + Date.now(), label: label.slice(0, 20), data }); saveCustom(list)
+        const pop = document.getElementById('sndpad-pop'); if (pop) pop.remove(); this.toggle(btn)
+      }
+      inp.click()
     },
     toggle (btn) {
       const old = document.getElementById('sndpad-pop')
@@ -160,6 +197,22 @@
         b.onclick = () => this.trigger(s.id)
         grid.appendChild(b)
       }
+      // Kullanıcının kendi sesleri (#19) + sil
+      for (const s of loadCustom()) {
+        const b = document.createElement('button'); b.className = 'snd-btn snd-custom'
+        b.innerHTML = `<span class="snd-emoji">🎵</span><span>${(window.esc ? esc(s.label) : s.label)}</span><span class="snd-del" title="Sil">✕</span>`
+        b.onclick = (e) => {
+          if (e.target.classList.contains('snd-del')) {
+            e.stopPropagation(); saveCustom(loadCustom().filter(x => x.id !== s.id))
+            const p = document.getElementById('sndpad-pop'); if (p) p.remove(); this.toggle(btn)
+          } else this.trigger(s.id)
+        }
+        grid.appendChild(b)
+      }
+      const add = document.createElement('button'); add.className = 'snd-btn snd-add'
+      add.innerHTML = '<span class="snd-emoji">＋</span><span>Ses ekle</span>'
+      add.onclick = () => this.addCustom(btn)
+      grid.appendChild(add)
       pop.appendChild(grid)
       document.body.appendChild(pop)
       const r = btn.getBoundingClientRect()

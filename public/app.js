@@ -208,7 +208,7 @@ function onRoomEv (m) {
     return
   }
   if (m.ev && m.ev.kind === 'sndpad') { // soundboard: sadece aynı sesli sohbetteysek çal
-    if (window.Voice && Voice.room === m.room && window.Soundboard) Soundboard.remote(String(m.ev.id || ''))
+    if (window.Voice && Voice.room === m.room && window.Soundboard) Soundboard.remote(String(m.ev.id || ''), m.ev.data)
     return
   }
   if (m.ev && m.ev.kind === 'game') { // oyun modu olayları (davet/durum/pozisyon)

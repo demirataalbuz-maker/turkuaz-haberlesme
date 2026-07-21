@@ -1917,7 +1917,7 @@ const CallMgr = {
         if (from === this.peer) { this.remoteScreenSid = data.screen || null; this.renderVideos() }
         break
       case 'call-snd': // DM aramasında soundboard
-        if (from === this.peer && this.state === 'active' && window.Soundboard) Soundboard.remote(String(data.id || ''))
+        if (from === this.peer && this.state === 'active' && window.Soundboard) Soundboard.remote(String(data.id || ''), data.data)
         break
       case 'sdp': if (from === this.peer && this.pc) this.onSdp(data.desc); break
       case 'ice': if (from === this.peer && this.pc) { try { this.pc.addIceCandidate(data.cand || undefined).catch(() => {}) } catch {} } break

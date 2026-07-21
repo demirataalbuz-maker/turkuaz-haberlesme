@@ -395,6 +395,14 @@ button { font-family: inherit; }
 }
 .snd-btn:hover { border-color: var(--tq); color: var(--tx); background: var(--bg3); }
 .snd-btn .snd-emoji { font-size: 20px; }
+/* Kullanıcının kendi sesleri (#19) */
+.snd-btn.snd-custom { position: relative; }
+.snd-btn.snd-custom .snd-del {
+  position: absolute; top: 2px; right: 3px; font-size: 10px; color: var(--tx3);
+  width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 4px;
+}
+.snd-btn.snd-custom .snd-del:hover { color: #ff6b6b; background: var(--bg1); }
+.snd-btn.snd-add { border-style: dashed; color: var(--tq); }
 
 /* ---- oyun modu ---- */
 #game-menu {
