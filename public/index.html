@@ -107,13 +107,16 @@
       <div id="lr-controls" class="hidden">
         <span id="lr-connection" class="lr-connection" data-quality="connecting" role="status" aria-live="polite">● Ses hazırlanıyor</span>
         <span class="lr-hint">Balonunu sürükle — sesler bulunduğun yönden gelir</span>
-        <button id="btn-mic">🎙️ Sustur</button>
-        <button id="btn-cam">📷 Kamera</button>
-        <button id="btn-screen">🖥️ Ekran paylaş</button>
-        <button id="btn-sndpad">🎵 Sesler</button>
-        <button id="btn-games">🎮 Oyun</button>
-        <button id="btn-voicemode" title="Düz konuşma moduna geç">💬 Düz mod</button>
-        <button id="btn-voice-leave" class="danger">📞 Ayrıl</button>
+        <div class="lr-ctrl-group">
+          <button id="btn-mic" class="lr-icon" title="Mikrofonu sustur (Ctrl+Shift+M)">🎙️</button>
+          <button id="btn-deafen" class="lr-icon" title="Sağırlaştır — kimseyi duyma (Ctrl+Shift+D)">🎧</button>
+          <button id="btn-cam" class="lr-icon" title="Kamera">📷</button>
+          <button id="btn-screen" class="lr-icon" title="Ekran paylaş">🖥️</button>
+          <button id="btn-sndpad" class="lr-icon" title="Sesler">🎵</button>
+          <button id="btn-games" class="lr-icon" title="Oyun">🎮</button>
+          <button id="btn-voicemode" class="lr-icon" title="Düz konuşma moduna geç">💬</button>
+        </div>
+        <button id="btn-voice-leave" class="danger lr-icon" title="Ayrıl">📞</button>
       </div>
     </div>
 

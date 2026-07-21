@@ -634,15 +634,29 @@ button { font-family: inherit; }
   padding: 2px 10px; font-size: 12px; font-weight: 700; max-width: 150px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Discord-tarzı ses kontrol çubuğu — ikonlar sol-alta (#10) */
 #lr-controls { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
-.lr-hint { flex: 1; color: var(--tx3); font-size: 12px; }
-#lr-controls button {
-  background: var(--bg2); color: var(--tx); border: 1px solid var(--line);
-  border-radius: var(--rs); padding: 7px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+.lr-ctrl-group { order: 0; display: flex; align-items: center; gap: 4px; background: var(--bg1); padding: 4px; border-radius: 12px; }
+.lr-hint { order: 1; flex: 1; color: var(--tx3); font-size: 12px; }
+#lr-connection { order: 2; }
+#btn-voice-leave { order: 3; }
+.lr-icon {
+  width: 40px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--tx); border: none; border-radius: 9px;
+  cursor: pointer; font-size: 18px; line-height: 1; transition: background .12s, color .12s, transform .1s;
 }
-#lr-controls button:hover { border-color: var(--tq); }
-#lr-controls button.on { background: var(--tq-soft); color: var(--tq); border-color: var(--tq); }
-#lr-controls button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.lr-icon:hover { background: var(--bg3); transform: translateY(-1px); }
+.lr-icon.on { background: var(--tq-soft); color: var(--tq); }
+.lr-icon.muted, .lr-icon.deafened {
+  background: rgba(237, 66, 69, .16); color: #ed4245; position: relative;
+}
+/* susturulmuş/sağır: ikonun üstüne kırmızı çapraz çizgi */
+.lr-icon.muted::after, .lr-icon.deafened::after {
+  content: ''; position: absolute; left: 7px; right: 7px; top: 50%; height: 2px;
+  background: #ed4245; transform: rotate(-45deg); border-radius: 2px;
+}
+#btn-voice-leave.lr-icon { background: var(--danger); color: #fff; }
+#btn-voice-leave.lr-icon:hover { filter: brightness(1.12); }
 
 /* ================= ekran sahnesi ================= */
 /* Aktif yayınlar çubuğu — opt-in "İzle" çipleri */

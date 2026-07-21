@@ -69,6 +69,8 @@ let updateNotification = null
 let callNotification = null
 let lastMuteShortcutAt = 0
 let muteShortcutRegistered = false
+let lastDeafenShortcutAt = 0
+let deafenShortcutRegistered = false
 let updateState = {
   status: 'idle', currentVersion: app.getVersion(), version: null,
   percent: 0, manual: false, error: null, lastCheckedAt: null
@@ -325,6 +327,10 @@ async function start () {
     requireTrustedRenderer(event)
     return muteShortcutRegistered
   })
+  ipcMain.handle('turkuaz-shortcut-global-deafen-active', (event) => {
+    requireTrustedRenderer(event)
+    return deafenShortcutRegistered
+  })
 
   win = new BrowserWindow({
     width: 1300,
@@ -354,6 +360,16 @@ async function start () {
       try { win.webContents.send('turkuaz-shortcut-toggle-mute') } catch {}
     })
   } catch { muteShortcutRegistered = false }
+  // Sağırlaştır (deafen) — oyun odaktayken de tek tuş
+  try {
+    deafenShortcutRegistered = globalShortcut.register('CommandOrControl+Shift+D', () => {
+      const now = Date.now()
+      if (now - lastDeafenShortcutAt < 500) return
+      lastDeafenShortcutAt = now
+      if (!win || win.isDestroyed()) return
+      try { win.webContents.send('turkuaz-shortcut-toggle-deafen') } catch {}
+    })
+  } catch { deafenShortcutRegistered = false }
 
   // kapat → tepsiye küçül
   win.on('close', (e) => {
@@ -414,9 +430,13 @@ async function start () {
 app.on('before-quit', () => { quitting = true })
 app.on('will-quit', () => {
   try {
-    if (app.isReady()) globalShortcut.unregister('CommandOrControl+Shift+M')
+    if (app.isReady()) {
+      globalShortcut.unregister('CommandOrControl+Shift+M')
+      globalShortcut.unregister('CommandOrControl+Shift+D')
+    }
   } catch {}
   muteShortcutRegistered = false
+  deafenShortcutRegistered = false
 })
 app.on('window-all-closed', () => { if (quitting) app.quit() })
 

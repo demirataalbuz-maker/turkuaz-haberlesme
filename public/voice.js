@@ -434,6 +434,7 @@ const Voice = {
   cam: null,
   screen: null,
   muted: false,
+  deafened: false,
   ctx: null,
   master: null,
   hb: null,
@@ -531,6 +532,7 @@ const Voice = {
     this._myAnalyser.fftSize = 256
     this.inGain.connect(this._myAnalyser)
     this.room = activeConv.topic
+    this._roomJoinTs = Date.now() // ilk kadro sesini bastırmak için (#15)
     this.muted = false
     this.myPos = this.defaultPos(this.code())
     const rawTrack = this.micRaw && this.micRaw.getAudioTracks()[0]
@@ -593,9 +595,29 @@ const Voice = {
 
   toggleMute () {
     if (!this.mic) return
+    // Sağırken mikrofonu açmak sağırlığı da kaldırır (Discord davranışı)
+    if (this.deafened && this.muted) return this.toggleDeafen()
     this.muted = !this.muted
     this._micGate(this._gateOpen !== false)
     this.sendState()
+    this.sync()
+  },
+
+  // Sağırlaştırma (deafen): kimseyi duyma + mikrofonu da kapat (#18).
+  _applyMasterGain () {
+    if (this.master) this.master.gain.value = this.deafened ? 0 : (Number(_settings().outVol) || 100) / 100
+    for (const m of this.members.values()) this._applyElVolume(m) // düz-mod audioEl'leri de
+  },
+  toggleDeafen () {
+    if (!this.room) return
+    this.deafened = !this.deafened
+    if (this.deafened) {
+      this._wasMutedBeforeDeafen = this.muted
+      if (!this.muted && this.mic) { this.muted = true; this._micGate(this._gateOpen !== false); this.sendState() }
+    } else if (!this._wasMutedBeforeDeafen && this.muted && this.mic) {
+      this.muted = false; this._micGate(this._gateOpen !== false); this.sendState()
+    }
+    this._applyMasterGain()
     this.sync()
   },
 
@@ -835,6 +857,8 @@ const Voice = {
     }
     this.members.set(code, m)
     this.createPC(m)
+    // İlk kadro sesini bastır: yalnız ben odadayken SONRADAN katılana çal (#15)
+    if (Date.now() - (this._roomJoinTs || 0) > 2500) this._playJoinLeave(true)
     this.sync()
     return m
   },
@@ -1098,9 +1122,32 @@ const Voice = {
     })
   },
 
+  // ---- katıl/ayrıl bildirim sesi (TS-tarzı) — #15 ----
+  // Katıldı: yükselen iki nota; ayrıldı: alçalan. Kısa, ayrı bir AudioContext'ten.
+  _playJoinLeave (join) {
+    if (!_settings().joinLeaveSound) return
+    try {
+      const C = window.AudioContext || window.webkitAudioContext
+      const c = new C()
+      const notes = join ? [523, 784] : [784, 523]
+      notes.forEach((f, i) => {
+        const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f
+        const g = c.createGain(); const t = c.currentTime + i * 0.11
+        g.gain.setValueAtTime(0.0001, t)
+        g.gain.exponentialRampToValueAtTime(0.13, t + 0.02)
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15)
+        o.connect(g).connect(c.destination)
+        o.start(t); o.stop(t + 0.17)
+      })
+      setTimeout(() => c.close().catch(() => {}), 600)
+    } catch {}
+  },
+
   // ---- balon çarpışması: üst üste binme yok, değince "toink" ----
   _toinkLast: null,
   _toink (code) {
+    // Çarpışma sesi varsayılan KAPALI (#12): görsel itme kalır, ses rahatsız etmez.
+    if (!_settings().bubbleBumpSound) return
     const now = Date.now()
     this._toinkLast = this._toinkLast || {}
     if (now - (this._toinkLast[code] || 0) < 450) return
@@ -1309,7 +1356,7 @@ const Voice = {
       this.sync()
       return
     }
-    if (k === 'bye') { this.removeMember(from); return }
+    if (k === 'bye') { if (this.members.has(from)) this._playJoinLeave(false); this.removeMember(from); return }
     const m = this.members.get(from)
     if (!m) return
     if (k === 'sdp') this.onSdp(m, data.desc)
@@ -1404,14 +1451,24 @@ const Voice = {
     }
 
     const mic = this.el('btn-mic')
-    mic.textContent = this.muted ? '🔇 Sesi aç' : '🎙️ Sustur'
+    mic.textContent = '🎙️'
     mic.classList.toggle('muted', this.muted)
+    mic.title = this.muted ? 'Mikrofonu aç (Ctrl+Shift+M)' : 'Mikrofonu sustur (Ctrl+Shift+M)'
     mic.setAttribute('aria-pressed', this.muted ? 'true' : 'false')
+    const deaf = this.el('btn-deafen')
+    if (deaf) {
+      deaf.textContent = '🎧'
+      deaf.classList.toggle('deafened', this.deafened)
+      deaf.title = this.deafened ? 'Sağırlığı kaldır (Ctrl+Shift+D)' : 'Sağırlaştır — kimseyi duyma (Ctrl+Shift+D)'
+      deaf.setAttribute('aria-pressed', this.deafened ? 'true' : 'false')
+    }
     const cam = this.el('btn-cam')
-    cam.textContent = this.cam ? '📷 Kamerayı kapat' : '📷 Kamera'
+    cam.textContent = '📷'
+    cam.title = this.cam ? 'Kamerayı kapat' : 'Kamera'
     cam.classList.toggle('on', !!this.cam)
     const scr = this.el('btn-screen')
-    scr.textContent = this.screen ? '🖥️ Paylaşımı durdur' : '🖥️ Ekran paylaş'
+    scr.textContent = '🖥️'
+    scr.title = this.screen ? 'Paylaşımı durdur' : 'Ekran paylaş'
     scr.classList.toggle('on', !!this.screen)
 
     this.renderMyBubble()
@@ -1425,9 +1482,10 @@ const Voice = {
     this._syncZoneHint()
     const mb = this.el('btn-voicemode')
     if (mb) {
-      mb.textContent = flat ? '🎧 Konumsal' : '💬 Düz mod'
+      mb.textContent = flat ? '🛋️' : '💬'
       mb.title = flat ? 'Konumsal (oturma odası) moduna geç' : 'Düz konuşma moduna geç'
       mb.setAttribute('aria-label', mb.title)
+      mb.classList.toggle('on', !flat)
     }
     this._audibleSoon() // üyelik/mod değişince budamayı tazele
     if (this._lastTuneN !== this.members.size) { this._lastTuneN = this.members.size; this._retuneAudio() } // kişi sayısına göre bitrate
@@ -2079,6 +2137,7 @@ document.addEventListener('DOMContentLoaded', () => {
   Voice.el('btn-voice-join').onclick = () => Voice.join()
   Voice.el('btn-voice-leave').onclick = () => Voice.leave()
   Voice.el('btn-mic').onclick = () => Voice.toggleMute()
+  Voice.el('btn-deafen') && (Voice.el('btn-deafen').onclick = () => Voice.toggleDeafen())
   Voice.el('btn-cam').onclick = () => Voice.toggleCam()
   Voice.el('btn-screen').onclick = () => Voice.toggleScreen()
   Voice.el('btn-voicemode').onclick = () => Voice.setVoiceMode(Voice.flat() ? 'spatial' : 'flat')
@@ -2133,6 +2192,14 @@ document.addEventListener('DOMContentLoaded', () => {
       toggleMuteShortcut()
     })
   }
+  const toggleDeafenShortcut = () => { if (Voice.room) Voice.toggleDeafen() }
+  const installLocalDeafenShortcut = () => {
+    document.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey && e.shiftKey && e.code === 'KeyD') || e.repeat) return
+      e.preventDefault()
+      toggleDeafenShortcut()
+    })
+  }
   const shortcuts = window.turkuazDesktop?.shortcuts
   if (shortcuts?.onToggleMute) {
     shortcuts.onToggleMute(toggleMuteShortcut)
@@ -2142,6 +2209,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }).catch(installLocalMuteShortcut)
     } else installLocalMuteShortcut()
   } else installLocalMuteShortcut()
+  if (shortcuts?.onToggleDeafen) {
+    shortcuts.onToggleDeafen(toggleDeafenShortcut)
+    if (shortcuts.isGlobalDeafenActive) {
+      shortcuts.isGlobalDeafenActive().then(active => { if (!active) installLocalDeafenShortcut() }).catch(installLocalDeafenShortcut)
+    } else installLocalDeafenShortcut()
+  } else installLocalDeafenShortcut()
   setInterval(() => Voice.pruneSeen(), VOICE_HEARTBEAT_MS)
   Voice.sync()
 })

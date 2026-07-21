@@ -15,6 +15,13 @@ contextBridge.exposeInMainWorld('turkuazDesktop', {
       const handler = () => callback()
       ipcRenderer.on('turkuaz-shortcut-toggle-mute', handler)
       return () => ipcRenderer.removeListener('turkuaz-shortcut-toggle-mute', handler)
+    },
+    isGlobalDeafenActive: () => ipcRenderer.invoke('turkuaz-shortcut-global-deafen-active'),
+    onToggleDeafen: (callback) => {
+      if (typeof callback !== 'function') return () => {}
+      const handler = () => callback()
+      ipcRenderer.on('turkuaz-shortcut-toggle-deafen', handler)
+      return () => ipcRenderer.removeListener('turkuaz-shortcut-toggle-deafen', handler)
     }
   },
   updates: {

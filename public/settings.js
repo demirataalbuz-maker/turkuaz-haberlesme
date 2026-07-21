@@ -7,6 +7,7 @@
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
     vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, theme: 'dark', density: 'cozy', notif: true,
+    joinLeaveSound: true, bubbleBumpSound: false,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -270,6 +271,20 @@
         if (window.Voice && Voice.room) Voice.setVoiceMode(v) // odadaysan anında geç
       }),
       'Düz: normal grup araması, herkes eşit seviyede — varsayılan. Konumsal: balonunu sürükle, sesler yönünden gelir (kulaklık önerilir). Anında geçerli.'))
+    // Katıl/ayrıl bildirim sesi (#15)
+    const jlSwitch = document.createElement('label'); jlSwitch.className = 'set-switch'
+    const jlCb = document.createElement('input'); jlCb.type = 'checkbox'; jlCb.checked = settings.joinLeaveSound !== false
+    jlCb.onchange = () => TurkuazSettings.set('joinLeaveSound', jlCb.checked)
+    jlSwitch.append(jlCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gVoice.appendChild(row('Katılma/ayrılma sesi 🔔', jlSwitch,
+      'Biri sesli sohbete katılınca (yükselen) veya çıkınca (alçalan) kısa bir bildirim sesi — TeamSpeak tarzı. Anında geçerli.'))
+    // Balon çarpışma sesi (#12) — varsayılan kapalı
+    const bbSwitch = document.createElement('label'); bbSwitch.className = 'set-switch'
+    const bbCb = document.createElement('input'); bbCb.type = 'checkbox'; bbCb.checked = !!settings.bubbleBumpSound
+    bbCb.onchange = () => TurkuazSettings.set('bubbleBumpSound', bbCb.checked)
+    bbSwitch.append(bbCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gVoice.appendChild(row('Balon çarpışma sesi', bbSwitch,
+      'Konumsal modda balonlar birbirine değince "toink" sesi. Varsayılan kapalı — rahatsız edici olabilir.'))
     p.appendChild(gVoice)
 
     // Konuşma modu (açık / ses etkinliği / bas-konuş)
