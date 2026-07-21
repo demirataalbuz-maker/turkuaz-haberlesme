@@ -542,15 +542,18 @@ async function main () {
     return Math.round(m.gain.gain.value * 100)
   })()`)
   if (volOk !== 40) fail('kişi-bazlı ses uygulanmadı: ' + volOk)
-  const fsBtn = await pB.eval(`(() => { const p = document.querySelector('.stream-panel'); return !!(p && p.querySelector('.sp-full') && typeof p.requestFullscreen === 'function') })()`)
-  if (!fsBtn) fail('tam ekran butonu/API yok')
-  // GERÇEK tam ekran: izin (fullscreen) verilmezse burada reddedilir
-  const fsRes = await pB.eval(`document.querySelector('.stream-panel').requestFullscreen().then(() => 'OK').catch(e => 'ERR:' + e.message)`, { userGesture: true })
-  if (fsRes !== 'OK') fail('requestFullscreen reddedildi: ' + fsRes)
-  const fsOn = await pB.eval("!!document.fullscreenElement")
-  await pB.eval("document.exitFullscreen().catch(() => {}); true")
-  if (!fsOn) fail('fullscreenElement set değil')
-  console.log('PASS: kişi-bazlı ses (üye gain=' + volOk + '%) + tam ekran GERÇEKTEN açılıyor')
+  // Büyüt/küçült: CSS-maximize (Fullscreen API değil → donanım sıçraması yok) +
+  // her kenardan boyutlandırma tutamakları var mı
+  const panelUi = await pB.eval(`(() => {
+    const p = document.querySelector('.stream-panel'); if (!p) return 'panel-yok'
+    if (!p.querySelector('.sp-full')) return 'buyut-butonu-yok'
+    if (p.querySelectorAll('.sp-rz').length !== 8) return 'boyutlandirma-tutamaklari-eksik'
+    p.querySelector('.sp-full').click(); if (!p.classList.contains('maximized')) return 'buyut-calismadi'
+    p.querySelector('.sp-full').click(); if (p.classList.contains('maximized')) return 'kucult-calismadi'
+    return 'OK'
+  })()`)
+  if (panelUi !== 'OK') fail('yayın paneli UI bozuk: ' + panelUi)
+  console.log('PASS: kişi-bazlı ses (üye gain=' + volOk + '%) + büyüt/küçült + 8 yönlü boyutlandırma')
 
   console.log('--- 4c) Konuşma modu: bas-konuş (PTT) mikrofon kapısı')
   await pA.eval("TurkuazSettings.set('speakMode','ptt'); TurkuazSettings.set('pttKey','KeyT'); Voice._startGate(); true")

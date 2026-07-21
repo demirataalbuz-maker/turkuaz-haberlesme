@@ -1664,7 +1664,7 @@ const Voice = {
     el.innerHTML =
       '<div class="sp-head"><span class="sp-label"></span>' +
       '<span class="sp-actions">' +
-      '<button class="sp-full" title="Tam ekran (çift tıkla)">⛶</button>' +
+      '<button class="sp-full" title="Büyüt / küçült (çift tıkla)">⛶</button>' +
       '<button class="sp-close" title="Yayından çık">✕</button>' +
       '</span></div>' +
       '<div class="sp-body"><video autoplay playsinline></video></div>' +
@@ -1672,7 +1672,11 @@ const Voice = {
       '<span class="sp-ico" title="Parlaklık">🔆</span><input class="sp-bright" type="range" min="30" max="170" value="100">' +
       '<span class="sp-ico" title="Ses">🔊</span><input class="sp-vol" type="range" min="0" max="150" value="100">' +
       '</div>' +
-      '<div class="sp-resize" title="Boyutlandır"></div>'
+      // Her kenardan + köşeden boyutlandır (sağ/sol/üst/alt) — kullanıcı isteği
+      '<div class="sp-rz sp-rz-n" data-dir="n"></div><div class="sp-rz sp-rz-s" data-dir="s"></div>' +
+      '<div class="sp-rz sp-rz-e" data-dir="e"></div><div class="sp-rz sp-rz-w" data-dir="w"></div>' +
+      '<div class="sp-rz sp-rz-ne" data-dir="ne"></div><div class="sp-rz sp-rz-nw" data-dir="nw"></div>' +
+      '<div class="sp-rz sp-rz-se" data-dir="se"></div><div class="sp-rz sp-rz-sw" data-dir="sw"></div>'
     document.body.appendChild(el)
     const video = el.querySelector('video')
     const label = el.querySelector('.sp-label')
@@ -1686,21 +1690,25 @@ const Voice = {
     vol.oninput = () => { video.volume = Math.min(1, vol.value / 100) }
     // ✕ = yayından çık
     el.querySelector('.sp-close').onclick = () => this._unwatchStream(a.key)
-    // Tam ekran aç/kapa — temiz overlay (#4)
+    // Büyüt/küçült: gerçek Fullscreen API DEĞİL — CSS ile pencereyi doldur. Fullscreen
+    // API donanım render yoluna geçip "sıçrama"ya yol açıyordu; küçükken çalışan yol
+    // korunuyor → sıçrama yok. (Kullanıcı: "tam ekran sıçrıyor, küçükken sorun yok".)
     const full = el.querySelector('.sp-full')
     full.onclick = () => {
-      if (document.fullscreenElement === el) { document.exitFullscreen().catch(() => {}) } else if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
+      const max = el.classList.toggle('maximized')
+      full.textContent = max ? '🗗' : '⛶'
+      full.title = max ? 'Küçült' : 'Büyüt'
     }
     video.ondblclick = () => full.click()
     this._makePanelDraggable(el, el.querySelector('.sp-head'))
-    this._makePanelResizable(el, el.querySelector('.sp-resize'))
+    for (const h of el.querySelectorAll('.sp-rz')) this._makePanelResize(el, h, h.dataset.dir)
     return { el, video, label }
   },
 
   _makePanelDraggable (el, handle) {
     let sx, sy, ox, oy, drag = false
     handle.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button, input')) return
+      if (e.target.closest('button, input') || el.classList.contains('maximized')) return
       drag = true; sx = e.clientX; sy = e.clientY
       const r = el.getBoundingClientRect(); ox = r.left; oy = r.top
       try { handle.setPointerCapture(e.pointerId) } catch {}
@@ -1718,22 +1726,31 @@ const Voice = {
     handle.addEventListener('pointercancel', end)
   },
 
-  _makePanelResizable (el, handle) {
-    let sx, sy, sw, sh, rz = false
+  // Kenar/köşe boyutlandırma. dir = n/s/e/w kombinasyonu. Sol/üst çekişinde hem
+  // boyut hem konum (left/top) ayarlanır ki karşı kenar sabit kalsın.
+  _makePanelResize (el, handle, dir) {
     handle.addEventListener('pointerdown', (e) => {
-      rz = true; sx = e.clientX; sy = e.clientY
-      const r = el.getBoundingClientRect(); sw = r.width; sh = r.height
-      try { handle.setPointerCapture(e.pointerId) } catch {}
-      e.stopPropagation()
+      if (el.classList.contains('maximized')) return // büyükken boyutlandırma yok
+      e.stopPropagation(); e.preventDefault()
+      const r = el.getBoundingClientRect()
+      const s = { x: e.clientX, y: e.clientY, w: r.width, h: r.height, left: r.left, top: r.top }
+      const move = (ev) => {
+        const dx = ev.clientX - s.x; const dy = ev.clientY - s.y
+        let w = s.w; let h = s.h; let left = s.left; let top = s.top
+        if (dir.includes('e')) w = Math.max(220, s.w + dx)
+        if (dir.includes('s')) h = Math.max(150, s.h + dy)
+        if (dir.includes('w')) { w = Math.max(220, s.w - dx); left = s.left + (s.w - w) }
+        if (dir.includes('n')) { h = Math.max(150, s.h - dy); top = s.top + (s.h - h) }
+        el.style.width = w + 'px'; el.style.height = h + 'px'
+        el.style.left = left + 'px'; el.style.top = top + 'px'
+      }
+      const up = (ev) => {
+        document.removeEventListener('pointermove', move)
+        document.removeEventListener('pointerup', up)
+      }
+      document.addEventListener('pointermove', move)
+      document.addEventListener('pointerup', up)
     })
-    handle.addEventListener('pointermove', (e) => {
-      if (!rz) return
-      el.style.width = Math.max(220, sw + (e.clientX - sx)) + 'px'
-      el.style.height = Math.max(150, sh + (e.clientY - sy)) + 'px'
-    })
-    const end = (e) => { rz = false; try { handle.releasePointerCapture(e.pointerId) } catch {} }
-    handle.addEventListener('pointerup', end)
-    handle.addEventListener('pointercancel', end)
   },
 
   makeBubble (code, name, avatar, mine) {

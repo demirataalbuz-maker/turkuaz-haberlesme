@@ -743,16 +743,26 @@ button { font-family: inherit; }
 }
 .sp-ctrl .sp-ico { font-size: 13px; flex-shrink: 0; }
 .sp-ctrl input[type=range] { flex: 1; min-width: 40px; accent-color: var(--tq); cursor: pointer; }
-.sp-resize {
-  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, var(--line) 50%, var(--line) 60%, transparent 60%, transparent 72%, var(--line) 72%, var(--line) 82%, transparent 82%);
+/* Her kenardan + köşeden boyutlandırma tutamakları (kullanıcı isteği: sağ/soldan çek) */
+.sp-rz { position: absolute; z-index: 2; }
+.sp-rz-n { top: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.sp-rz-s { bottom: -3px; left: 8px; right: 8px; height: 8px; cursor: ns-resize; }
+.sp-rz-e { right: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.sp-rz-w { left: -3px; top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; }
+.sp-rz-ne { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+.sp-rz-nw { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.sp-rz-se { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.sp-rz-sw { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+/* Büyüt: CSS ile pencereyi doldur (gerçek Fullscreen API değil → donanım render yolu
+   değişmiyor, sıçrama yok). Küçükken çalışan görüntüleme yolu korunur. */
+.stream-panel.maximized {
+  left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important;
+  border: none; border-radius: 0; z-index: 200;
 }
-/* Tam ekran: temiz — kontroller görünür kalsın, "kaçak site" hissi gitsin (#4) */
-.stream-panel:fullscreen { width: 100vw !important; height: 100vh !important; border: none; border-radius: 0; }
-.stream-panel:fullscreen .sp-head { padding: 10px 18px; background: rgba(8,17,15,.72); }
-.stream-panel:fullscreen .sp-label { font-size: 15px; }
-.stream-panel:fullscreen .sp-ctrl { background: rgba(8,17,15,.72); padding: 10px 18px; }
-.stream-panel:fullscreen .sp-resize { display: none; }
+.stream-panel.maximized .sp-head { padding: 10px 18px; }
+.stream-panel.maximized .sp-label { font-size: 15px; }
+.stream-panel.maximized .sp-ctrl { padding: 10px 18px; }
+.stream-panel.maximized .sp-rz { display: none; }
 
 /* kişi-bazlı ses popover'ı (balona sağ tıkla) */
 .lr-volpop {
