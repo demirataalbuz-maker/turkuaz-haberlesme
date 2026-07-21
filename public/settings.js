@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
-    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, smartGate: false, theme: 'dark', density: 'cozy', notif: true,
     joinLeaveSound: true, bubbleBumpSound: false,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
@@ -258,6 +258,13 @@
     ngSwitch.append(ngCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gGame.appendChild(row('Noise gate 🔇', ngSwitch,
       'Konuşmadığında mikrofonu tam keser → kimse klavyeni/fanını duymaz. Konuşunca anında açılır. Bir sonraki katılım/aramada geçerli.'))
+    // Akıllı gate (VAD) — deneysel
+    const sgSwitch = document.createElement('label'); sgSwitch.className = 'set-switch'
+    const sgCb = document.createElement('input'); sgCb.type = 'checkbox'; sgCb.checked = !!settings.smartGate
+    sgCb.onchange = () => TurkuazSettings.set('smartGate', sgCb.checked)
+    sgSwitch.append(sgCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gGame.appendChild(row('Akıllı gate — VAD 🧠 (deneysel)', sgSwitch,
+      'Noise gate açıkken çalışır. "Yüksek mi?" yerine "gerçekten insan sesi mi?" der (Silero yapay sinir ağı) → yüksek klavye takırtısını bile keser, kısık konuşmayı yakalar. Yüklenemezse otomatik olarak normal gate\'e döner. Bir sonraki katılım/aramada geçerli.'))
     p.appendChild(gGame)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)

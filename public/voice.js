@@ -271,13 +271,23 @@ async function buildMic (obj) {
     // Kapı kararı GİRİŞ enerjisinden alınır (limiter makeup'tan bağımsız → "ses
     // sabitleme" açıkken bile eşik tutarlı). Kapılanan sinyal işlenmiş chainOut.
     obj.inGain.connect(gan); chainOut.connect(gate); gate.connect(dest)
+    // Akıllı gate (opt-in, DENEYSEL): VAD hazırsa "insan sesi mi" kararı — yüksek ama
+    // konuşma-olmayan sesi (klavye/fan) kesmede amplitüdden iyi. Hazır değilse/kapalıysa
+    // amplitüde güvenli düşer (mevcut davranış).
+    if (_settings().smartGate) startVad(obj)
     const buf = new Uint8Array(gan.fftSize)
     let openUntil = 0
     obj._ngInt = setInterval(() => {
-      gan.getByteTimeDomainData(buf)
-      let dev = 0; for (const v of buf) dev = Math.max(dev, Math.abs(v - 128))
       const now = performance.now()
-      if (dev > 7) openUntil = now + 220 // konuşma algılandı → 220ms daha açık tut
+      let voice
+      if (_settings().smartGate && obj._vadReady && (now - (obj._vadTs || 0) < 500)) {
+        voice = (obj._vadProb || 0) > 0.5 // Silero konuşma olasılığı
+      } else {
+        gan.getByteTimeDomainData(buf)
+        let dev = 0; for (const v of buf) dev = Math.max(dev, Math.abs(v - 128))
+        voice = dev > 7 // amplitüd yedeği
+      }
+      if (voice) openUntil = now + 220 // konuşma algılandı → 220ms daha açık tut
       const open = now < openUntil
       try { gate.gain.setTargetAtTime(open ? 1 : 0, obj.ctx.currentTime, open ? 0.004 : 0.06) } catch {}
     }, 25)
@@ -421,6 +431,43 @@ function applyReceiverLatency (pc, low) {
     try { if ('jitterBufferTarget' in r) r.jitterBufferTarget = ms } catch {}
     try { if ('playoutDelayHint' in r) r.playoutDelayHint = ms == null ? null : ms / 1000 } catch {}
   }
+}
+
+// Silero VAD (opt-in akıllı gate, DENEYSEL): obj.inGain'i taplar, "konuşma olasılığı"nı
+// obj._vadProb'a yazar. Analiz-only worklet → 0-kazanç sink → dest (grafik pull etsin).
+// Her adım try/catch — yüklenemez/hata verirse gate sessizce amplitüde düşer. Ses
+// yolu VAD'den GEÇMEZ (ek gecikme yok). vendor/vad/PROVENANCE.md
+function startVad (obj) {
+  if (obj._vadStarted || !obj.ctx || !obj.inGain) return
+  obj._vadStarted = true; obj._vadReady = false
+  ;(async () => {
+    try {
+      const ctx = obj.ctx
+      if (!ctx._vadModule) { await ctx.audioWorklet.addModule('vad-worklet.js'); ctx._vadModule = true }
+      const worker = new Worker('vad-worker.js')
+      const node = new AudioWorkletNode(ctx, 'vad-worklet', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] })
+      const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination)
+      const ch = new MessageChannel()
+      worker.postMessage({ port: ch.port2 }, [ch.port2])
+      node.port.postMessage({ port: ch.port1 }, [ch.port1])
+      worker.postMessage({ t: 'init', model: 'vendor/vad/silero_vad.onnx' })
+      worker.onmessage = (e) => {
+        const m = e.data
+        if (m && m.ready) obj._vadReady = true
+        else if (m && typeof m.prob === 'number') { obj._vadProb = m.prob; obj._vadTs = performance.now() }
+        else if (m && m.error) obj._vadReady = false
+      }
+      worker.onerror = () => { obj._vadReady = false }
+      obj.inGain.connect(node); node.connect(sink)
+      obj._vadNode = node; obj._vadWorker = worker; obj._vadSink = sink
+    } catch { obj._vadReady = false; obj._vadStarted = false }
+  })()
+}
+function stopVad (obj) {
+  try { if (obj._vadNode) { obj._vadNode.disconnect(); obj._vadNode = null } } catch {}
+  try { if (obj._vadSink) { obj._vadSink.disconnect(); obj._vadSink = null } } catch {}
+  try { if (obj._vadWorker) { obj._vadWorker.terminate(); obj._vadWorker = null } } catch {}
+  obj._vadStarted = false; obj._vadReady = false
 }
 
 // ============================================================
@@ -583,6 +630,7 @@ const Voice = {
     }
     if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
     if (this._ngInt) { clearInterval(this._ngInt); this._ngInt = null }
+    stopVad(this)
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
@@ -718,6 +766,7 @@ const Voice = {
     try { if (obj.micRaw) obj.micRaw.getTracks().forEach(t => t.stop()) } catch {}
     if (obj._denoise && obj._denoise._rnnoiseCleanup) { try { obj._denoise._rnnoiseCleanup() } catch {} }
     if (obj._ngInt) { clearInterval(obj._ngInt); obj._ngInt = null }
+    stopVad(obj)
     try { if (obj.ctx) await obj.ctx.close() } catch {}
   },
 
@@ -2111,6 +2160,7 @@ const CallMgr = {
     }
     if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
     if (this._ngInt) { clearInterval(this._ngInt); this._ngInt = null }
+    stopVad(this)
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl = null }
