@@ -1304,11 +1304,12 @@ const Voice = {
     const lats = peers.map(m => m.latencyMs).filter(Number.isFinite)
     const rtts = peers.map(m => m.rtt).filter(Number.isFinite)
     const losses = peers.map(m => m.loss).filter(Number.isFinite)
+    const ping = lats.length ? Math.max(...lats) : (rtts.length ? Math.round(Math.max(...rtts) * 1000) : null)
     const detail = [
       lats.length ? `gecikme ~${Math.max(...lats)} ms` : (rtts.length ? `RTT ${Math.round(Math.max(...rtts) * 1000)} ms` : ''),
       losses.length ? `kayıp %${Math.max(...losses).toFixed(1)}` : ''
     ].filter(Boolean).join(' · ')
-    return { quality, statusText, detail }
+    return { quality, statusText, detail, ping }
   },
 
   syncConnectionUI () {
@@ -1320,7 +1321,7 @@ const Voice = {
         const room = state.rooms.find(r => r.topic === this.room)
         dock.dataset.quality = summary.quality
         this.el('voice-dock-room').textContent = (room && room.name) || 'Sesli sohbet'
-        this.el('voice-dock-status').textContent = summary.statusText
+        this.el('voice-dock-status').textContent = summary.statusText + (summary.ping != null ? ' · ' + summary.ping + ' ms' : '')
         dock.title = summary.detail
         const mute = this.el('voice-dock-mute')
         mute.classList.toggle('muted', this.muted)
@@ -1333,9 +1334,40 @@ const Voice = {
     if (indicator && this.room) {
       const summary = this.connectionSnapshot()
       indicator.dataset.quality = summary.quality
-      indicator.textContent = '● ' + summary.statusText
-      indicator.title = summary.detail
+      // Ping'i doğrudan göster (#16) — sadece "iyi" değil, gerçek ms
+      indicator.textContent = '● ' + summary.statusText + (summary.ping != null ? ' · ' + summary.ping + ' ms' : '')
+      indicator.title = (summary.detail || '') + '  (çift tık: gecikme testi)'
+      if (!indicator._latWired) {
+        indicator._latWired = true
+        indicator.style.cursor = 'pointer'
+        indicator.addEventListener('dblclick', () => this.showLatencyTest())
+      }
     }
+  },
+
+  // Gecikme testi (#16): taze RTT ölç, her kişinin ms'ini listele, yenile tuşu.
+  showLatencyTest () {
+    if (!this.room) return
+    const old = document.getElementById('lat-test'); if (old) old.remove()
+    const box = document.createElement('div'); box.id = 'lat-test'; box.className = 'lat-test'
+    const render = () => {
+      const rows = [...this.members.values()].map(m => {
+        const ms = Number.isFinite(m.latencyMs) ? m.latencyMs : null
+        const rtt = Number.isFinite(m.rtt) ? Math.round(m.rtt * 1000) : null
+        const cls = ms == null ? 'na' : (ms < 60 ? 'good' : ms < 130 ? 'warn' : 'bad')
+        const val = ms != null ? ms + ' ms' : (rtt != null ? 'RTT ' + rtt + ' ms' : 'ölçülüyor…')
+        return `<div class="lt-row"><span>${esc(this.dispName(m))}</span><b class="lt-${cls}">${val}</b></div>`
+      }).join('') || '<div class="lt-empty">Odada başka kimse yok</div>'
+      box.innerHTML = `<div class="lt-head">📶 Gecikme testi<button class="lt-close" title="Kapat">✕</button></div>${rows}<button class="lt-again">🔄 Yeniden test et</button>`
+      box.querySelector('.lt-close').onclick = () => box.remove()
+      box.querySelector('.lt-again').onclick = () => { this.sampleStats(); setTimeout(render, 700) }
+    }
+    render()
+    document.body.appendChild(box)
+    this.sampleStats(); setTimeout(render, 700) // taze ölçüm
+    setTimeout(() => document.addEventListener('pointerdown', function h (e) {
+      if (!box.contains(e.target)) { box.remove(); document.removeEventListener('pointerdown', h) }
+    }), 0)
   },
 
   onRtc ({ from, data }) {
@@ -1349,7 +1381,8 @@ const Voice = {
       this.markSeen(this.room, from, data.name)
       const m = this.ensureMember(from, data.name)
       m.muted = !!data.muted
-      m.avatar = String(data.avatar || '').slice(0, 8) // uzak veri: emoji boyutunda tut
+      // uzak avatar: emoji VEYA güvenli raster resim data-URL'i (≤20KB); render avatarHTML'de doğrulanır
+      m.avatar = (window.isImgAvatar && isImgAvatar(data.avatar) && data.avatar.length <= 20000) ? data.avatar : String(data.avatar || '').slice(0, 8)
       m.screenSid = data.screen || null
       if (data.pos) { m.pos = this.clampPos(data.pos); this.updatePanner(m); this.avoidOverlap() }
       this.updateBubble(m)
@@ -1657,10 +1690,11 @@ const Voice = {
   makeBubble (code, name, avatar, mine) {
     const b = document.createElement('div')
     b.className = 'lr-bubble' + (mine ? ' me' : '')
-    // avatar UZAK peer'dan gelir (rtc hello) ve çekirdekte sanitize edilmez —
-    // ham basılırsa <img onerror> ile bu origin'de JS çalışır (seed hırsızlığı).
+    // avatar UZAK peer'dan gelir (rtc hello). Emoji ham basılırsa <img onerror> ile
+    // JS çalışabilir → esc şart. Resim avatarı yalnız güvenli raster data-URL (isImgAvatar).
+    const isImg = window.isImgAvatar && isImgAvatar(avatar)
     const face = avatar
-      ? `<div class="lr-face" style="background:var(--bg3);font-size:38px">${esc(avatar)}<video autoplay playsinline muted></video><span class="lr-initial" style="display:none"></span></div>`
+      ? `<div class="lr-face"${isImg ? '' : ' style="background:var(--bg3);font-size:38px"'}>${isImg ? `<img class="lr-face-img" src="${esc(avatar)}" alt="">` : esc(avatar)}<video autoplay playsinline muted></video><span class="lr-initial" style="display:none"></span></div>`
       : `<div class="lr-face" style="background:${colorOf(code)}"><video autoplay playsinline muted></video><span class="lr-initial">${esc(initialOf(name, code))}</span></div>`
     b.innerHTML = face + '<div class="lr-name"></div>'
     this.el('lr-stage').appendChild(b)

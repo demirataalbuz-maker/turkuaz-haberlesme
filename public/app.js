@@ -354,11 +354,18 @@ function prevHTML (p) {
   </a>`
 }
 
+// Yalnız raster resim data-URL'i güvenli (png/jpeg/webp). SVG kabul EDİLMEZ —
+// <img src=svg> script çalıştırabilir. Uzak avatar buradan geçtiği için şart.
+function isImgAvatar (a) { return typeof a === 'string' && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(a) }
 function avatarHTML (avatar, name, code, dot) {
+  const dotHTML = dot !== undefined ? `<div class="dot ${dot ? 'on' : ''}"></div>` : ''
+  if (isImgAvatar(avatar)) {
+    return `<div class="avatar img"><img src="${esc(avatar)}" alt="">${dotHTML}</div>`
+  }
   const cls = avatar ? 'avatar emoji' : 'avatar'
   const bg = avatar ? '' : `background:${colorOf(code)}`
   const inner = avatar || initialOf(name, code)
-  return `<div class="${cls}" style="${bg}">${esc(inner)}${dot !== undefined ? `<div class="dot ${dot ? 'on' : ''}"></div>` : ''}</div>`
+  return `<div class="${cls}" style="${bg}">${esc(inner)}${dotHTML}</div>`
 }
 
 function avatarOf (code) {
@@ -1143,6 +1150,32 @@ document.addEventListener('keydown', (e) => {
 
 // ---- profil ----
 let selAvatar = ''
+// Kendi resmini avatar yap: 96x96 kare kırp → JPEG data-URL (≤20KB, P2P'de yayılır)
+function pickAvatarImage () {
+  const inp = document.createElement('input')
+  inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp'
+  inp.onchange = () => {
+    const file = inp.files && inp.files[0]
+    if (!file) return
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const S = 96
+      const cv = document.createElement('canvas'); cv.width = S; cv.height = S
+      const side = Math.min(img.width, img.height)
+      cv.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S)
+      let data = cv.toDataURL('image/jpeg', 0.72)
+      if (data.length > 20000) data = cv.toDataURL('image/jpeg', 0.5)
+      if (data.length > 20000) { if (window.toast) toast('Resim çok büyük — daha küçük/basit bir resim dene', 'error', 5000); return }
+      selAvatar = data
+      openProfile()
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); if (window.toast) toast('Resim okunamadı', 'error') }
+    img.src = url
+  }
+  inp.click()
+}
 function openProfile () {
   $('profile-name').value = state.me.name
   $('profile-status').value = state.me.status || ''
@@ -1159,6 +1192,20 @@ function openProfile () {
   none.setAttribute('aria-pressed', selAvatar === '' ? 'true' : 'false')
   none.onclick = () => { selAvatar = ''; openProfile(); setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0) }
   grid.appendChild(none)
+  // Resim yükle (#1)
+  const up = document.createElement('button')
+  up.type = 'button'; up.className = 'av-opt av-upload'; up.textContent = '🖼️'
+  up.title = 'Kendi resmini yükle'; up.setAttribute('aria-label', 'Avatar resmi yükle')
+  up.onclick = pickAvatarImage
+  grid.appendChild(up)
+  // Yüklenmiş resim avatarı seçiliyse önizleme
+  if (isImgAvatar(selAvatar)) {
+    const pv = document.createElement('button')
+    pv.type = 'button'; pv.className = 'av-opt av-imgopt sel'
+    pv.innerHTML = `<img src="${esc(selAvatar)}" alt="">`
+    pv.title = 'Yüklenen resim'; pv.setAttribute('aria-pressed', 'true')
+    grid.appendChild(pv)
+  }
   for (const a of AVATARS) {
     const el = document.createElement('button')
     el.type = 'button'
