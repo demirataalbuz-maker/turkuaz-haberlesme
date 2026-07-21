@@ -237,12 +237,18 @@ async function buildMic (obj) {
   // (kısık konuşanı kaldırır) + limiter (tepeleri yakalar). Tutarlı, rahat seviye
   // ve pompalama YOK. micLimiter açıkken tarayıcı AGC kapalıdır (çift işleme olmaz).
   if (_settings().micLimiter !== false) {
+    // Yüksek-geçiren: 85Hz altı gürültüyü (uğultu, masa titreşimi, patlama/plozif
+    // sesleri) temizler — sesi BOĞMADAN netleştirir (radyo/podcast standardı).
+    const hpf = obj.ctx.createBiquadFilter()
+    hpf.type = 'highpass'; hpf.frequency.value = 85; hpf.Q.value = 0.7
     const comp = obj.ctx.createDynamicsCompressor()
-    comp.threshold.value = -24; comp.knee.value = 30; comp.ratio.value = 3.5; comp.attack.value = 0.015; comp.release.value = 0.28
-    const makeup = obj.ctx.createGain(); makeup.gain.value = 1.7 // kısıkları kaldır
+    comp.threshold.value = -22; comp.knee.value = 26; comp.ratio.value = 3; comp.attack.value = 0.02; comp.release.value = 0.26
+    // makeup 1.7→1.35: daha hafif, gür konuşmada distortion/cızırtı yapmaz
+    const makeup = obj.ctx.createGain(); makeup.gain.value = 1.35
+    // limiter -3→-1.5, erken devreye girer → tepe aşımı olmadan yakalar (cızırtı yok)
     const limiter = obj.ctx.createDynamicsCompressor()
-    limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12
-    obj.inGain.connect(comp); comp.connect(makeup); makeup.connect(limiter); limiter.connect(dest)
+    limiter.threshold.value = -1.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.1
+    obj.inGain.connect(hpf); hpf.connect(comp); comp.connect(makeup); makeup.connect(limiter); limiter.connect(dest)
   } else {
     obj.inGain.connect(dest)
   }
