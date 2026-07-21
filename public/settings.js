@@ -228,12 +228,14 @@
     hqSwitch.append(hqCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gHQ.appendChild(row('Stüdyo modu (yüksek kalite)', hqSwitch,
       'Yankı engelleme + otomatik kazancı kapatır → ham, pompalamayan, temiz ses. YALNIZ KULAKLIKLA kullan — hoparlörde yankı yapar. Bir sonraki katılım/aramada geçerli.'))
-    const limSwitch = document.createElement('label'); limSwitch.className = 'set-switch'
-    const limCb = document.createElement('input'); limCb.type = 'checkbox'; limCb.checked = settings.micLimiter !== false
-    limCb.onchange = () => TurkuazSettings.set('micLimiter', limCb.checked)
-    limSwitch.append(limCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
-    gHQ.appendChild(row('Akıllı seviye (önerilen)', limSwitch,
-      'Pompalayan otomatik kazanç yerine hafif kompresör + limiter: kısık konuşan yükselir, bağıran patlamaz, herkes tutarlı seviyede. Bir sonraki katılım/aramada geçerli.'))
+    gHQ.appendChild(row('Ses seviyesi dengeleme',
+      selectEl([
+        { value: 'off', label: 'Kapalı' },
+        { value: 'normal', label: 'Normal (önerilen)' },
+        { value: 'strong', label: 'Ses sabitleme — bağıran/fısıldayan aynı seviye' }
+      ], (settings.micLimiter === false ? 'off' : (settings.micLimiter === 'strong' ? 'strong' : 'normal')),
+      v => TurkuazSettings.set('micLimiter', v)),
+      'Bağıran ve fısıldayan aynı seviyede duyulur (pompalamayan kompresör + limiter). "Ses sabitleme" en agresif — oyun için ideal, herkes tutarlı gelir. Bir sonraki katılım/aramada geçerli.'))
     p.appendChild(gHQ)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)

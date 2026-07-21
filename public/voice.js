@@ -23,7 +23,7 @@ function micConstraints (forceStandard = false) {
   // Stüdyo (yüksek kalite) modu: AEC + AGC kapalı → ham, temiz, pompalamayan ses.
   // AEC kapalı olduğu için YALNIZ kulaklıkta güvenli (hoparlörde yankı yapar).
   const hq = !!s.micHQ
-  const limiter = s.micLimiter !== false // akıllı seviye açıksa tarayıcı AGC'yi biz devralırız
+  const limiter = s.micLimiter !== false && s.micLimiter !== 'off' // dengeleme açıksa tarayıcı AGC'yi biz devralırız
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
   const audio = {
     echoCancellation: !hq,
@@ -236,16 +236,25 @@ async function buildMic (obj) {
   // Akıllı seviye normalizasyonu: pompalayan tarayıcı AGC yerine hafif kompresör
   // (kısık konuşanı kaldırır) + limiter (tepeleri yakalar). Tutarlı, rahat seviye
   // ve pompalama YOK. micLimiter açıkken tarayıcı AGC kapalıdır (çift işleme olmaz).
-  if (_settings().micLimiter !== false) {
-    // Yüksek-geçiren: 85Hz altı gürültüyü (uğultu, masa titreşimi, patlama/plozif
-    // sesleri) temizler — sesi BOĞMADAN netleştirir (radyo/podcast standardı).
+  // Ses seviyesi dengeleme: 'off' | 'normal' | 'strong' (ses sabitleme).
+  // Eski boolean'dan göç: true→normal, false→off.
+  const lvl = _settings().micLimiter === false ? 'off' : (_settings().micLimiter === 'strong' ? 'strong' : 'normal')
+  if (lvl !== 'off') {
+    const strong = lvl === 'strong'
+    // Yüksek-geçiren: 85Hz altı gürültüyü (uğultu, masa titreşimi, plozif) temizler
+    // — sesi BOĞMADAN netleştirir (radyo/podcast standardı).
     const hpf = obj.ctx.createBiquadFilter()
     hpf.type = 'highpass'; hpf.frequency.value = 85; hpf.Q.value = 0.7
     const comp = obj.ctx.createDynamicsCompressor()
-    comp.threshold.value = -22; comp.knee.value = 26; comp.ratio.value = 3; comp.attack.value = 0.02; comp.release.value = 0.26
-    // makeup 1.7→1.35: daha hafif, gür konuşmada distortion/cızırtı yapmaz
-    const makeup = obj.ctx.createGain(); makeup.gain.value = 1.35
-    // limiter -3→-1.5, erken devreye girer → tepe aşımı olmadan yakalar (cızırtı yok)
+    if (strong) {
+      // SES SABİTLEME: agresif — bağıran ve fısıldayan aynı seviyede çıkar (oyun için)
+      comp.threshold.value = -34; comp.knee.value = 22; comp.ratio.value = 6; comp.attack.value = 0.008; comp.release.value = 0.3
+    } else {
+      // NORMAL: hafif, doğal — tepeleri toplar, kısıkları biraz kaldırır
+      comp.threshold.value = -22; comp.knee.value = 26; comp.ratio.value = 3; comp.attack.value = 0.02; comp.release.value = 0.26
+    }
+    const makeup = obj.ctx.createGain(); makeup.gain.value = strong ? 2.4 : 1.35
+    // brickwall limiter: tepe aşımı olmadan yakalar → cızırtı/distortion yok
     const limiter = obj.ctx.createDynamicsCompressor()
     limiter.threshold.value = -1.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.1
     obj.inGain.connect(hpf); hpf.connect(comp); comp.connect(makeup); makeup.connect(limiter); limiter.connect(dest)
