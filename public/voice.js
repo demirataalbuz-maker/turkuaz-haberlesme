@@ -352,6 +352,26 @@ function preferVideoCodec (pc) {
   }
 }
 
+// Opus RED (yedekli kodlama): ses paketini önceki karelerle birlikte gönderir →
+// kayıpta çıtırtı olmaz (FEC'in üstüne bir kat zırh). Tarayıcı desteklemezse
+// sessizce atlar. Bant biraz artar ama adaptif bitrate dengeliyor.
+function preferAudioRed (pc) {
+  if (!window.RTCRtpTransceiver || !RTCRtpTransceiver.prototype.setCodecPreferences) return
+  let caps
+  try { caps = RTCRtpReceiver.getCapabilities('audio') } catch { return }
+  if (!caps || !caps.codecs || !caps.codecs.length) return
+  const red = caps.codecs.find(c => /(^|\/)red$/i.test(c.mimeType) || /audio\/red/i.test(c.mimeType))
+  if (!red) return // RED yok → varsayılanda kal
+  const opus = caps.codecs.filter(c => /opus/i.test(c.mimeType))
+  const rest = caps.codecs.filter(c => c !== red && !/opus/i.test(c.mimeType))
+  const ordered = [red, ...opus, ...rest]
+  for (const t of pc.getTransceivers()) {
+    if (t.sender && t.sender.track && t.sender.track.kind === 'audio') {
+      try { t.setCodecPreferences(ordered) } catch {}
+    }
+  }
+}
+
 // ============================================================
 // Oda sesli sohbeti + oturma odası
 // ============================================================
@@ -737,6 +757,7 @@ const Voice = {
       }
     }
     preferVideoCodec(pc)
+    preferAudioRed(pc) // Opus RED — kayıp zırhı
 
     pc.onicecandidate = (e) => this.sendRtc(m.code, { kind: 'ice', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
@@ -1603,6 +1624,7 @@ const CallMgr = {
     const pc = new RTCPeerConnection(rtcConfig())
     this.pc = pc
     for (const t of this.mic.getTracks()) pc.addTrack(t, this.mic)
+    preferAudioRed(pc) // Opus RED — kayıp zırhı
     pc.onicecandidate = (e) => this.sendRtc(this.peer, { kind: 'ice', scope: 'call', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
       // Oda tarafındaki glare önlemiyle aynı: kibar taraf ilk teklifi beklesin
