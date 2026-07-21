@@ -239,6 +239,7 @@ async function buildMic (obj) {
   // Ses seviyesi dengeleme: 'off' | 'normal' | 'strong' (ses sabitleme).
   // Eski boolean'dan göç: true→normal, false→off.
   const lvl = _settings().micLimiter === false ? 'off' : (_settings().micLimiter === 'strong' ? 'strong' : 'normal')
+  let chainOut
   if (lvl !== 'off') {
     const strong = lvl === 'strong'
     // Yüksek-geçiren: 85Hz altı gürültüyü (uğultu, masa titreşimi, plozif) temizler
@@ -257,9 +258,31 @@ async function buildMic (obj) {
     // brickwall limiter: tepe aşımı olmadan yakalar → cızırtı/distortion yok
     const limiter = obj.ctx.createDynamicsCompressor()
     limiter.threshold.value = -1.5; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.003; limiter.release.value = 0.1
-    obj.inGain.connect(hpf); hpf.connect(comp); comp.connect(makeup); makeup.connect(limiter); limiter.connect(dest)
+    obj.inGain.connect(hpf); hpf.connect(comp); comp.connect(makeup); makeup.connect(limiter)
+    chainOut = limiter
   } else {
-    obj.inGain.connect(dest)
+    chainOut = obj.inGain
+  }
+  // Noise gate (opsiyonel): konuşmayınca mikrofonu tam keser → kimse klavye/fan
+  // duymaz. Konuşunca hızlı açılır, sustuktan sonra 220ms açık tutup yumuşak kapanır.
+  if (_settings().noiseGate) {
+    const gate = obj.ctx.createGain(); gate.gain.value = 0
+    const gan = obj.ctx.createAnalyser(); gan.fftSize = 256
+    // Kapı kararı GİRİŞ enerjisinden alınır (limiter makeup'tan bağımsız → "ses
+    // sabitleme" açıkken bile eşik tutarlı). Kapılanan sinyal işlenmiş chainOut.
+    obj.inGain.connect(gan); chainOut.connect(gate); gate.connect(dest)
+    const buf = new Uint8Array(gan.fftSize)
+    let openUntil = 0
+    obj._ngInt = setInterval(() => {
+      gan.getByteTimeDomainData(buf)
+      let dev = 0; for (const v of buf) dev = Math.max(dev, Math.abs(v - 128))
+      const now = performance.now()
+      if (dev > 7) openUntil = now + 220 // konuşma algılandı → 220ms daha açık tut
+      const open = now < openUntil
+      try { gate.gain.setTargetAtTime(open ? 1 : 0, obj.ctx.currentTime, open ? 0.004 : 0.06) } catch {}
+    }, 25)
+  } else {
+    chainOut.connect(dest)
   }
   return dest.stream
 }
@@ -384,6 +407,19 @@ function preferAudioRed (pc) {
     if (t.sender && t.sender.track && t.sender.track.kind === 'audio') {
       try { t.setCodecPreferences(ordered) } catch {}
     }
+  }
+}
+
+// Alıcı audio jitter buffer hedefi: düşük gecikme modunda ~50ms (Chrome adaptif
+// varsayılanından düşük → minimum gecikme), kapalıyken varsayılana bırak (null).
+// playoutDelayHint (saniye) eski tarayıcı yedeği.
+function applyReceiverLatency (pc, low) {
+  if (!pc || !pc.getReceivers) return
+  const ms = low ? 50 : null
+  for (const r of pc.getReceivers()) {
+    if (!r.track || r.track.kind !== 'audio') continue
+    try { if ('jitterBufferTarget' in r) r.jitterBufferTarget = ms } catch {}
+    try { if ('playoutDelayHint' in r) r.playoutDelayHint = ms == null ? null : ms / 1000 } catch {}
   }
 }
 
@@ -541,6 +577,7 @@ const Voice = {
       if (this[s]) { this[s].getTracks().forEach(t => { t.onended = null; t.stop() }); this[s] = null }
     }
     if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
+    if (this._ngInt) { clearInterval(this._ngInt); this._ngInt = null }
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
@@ -653,6 +690,7 @@ const Voice = {
     if (obj._testBack) { try { obj._testBack.pause() } catch {}; obj._testBack.srcObject = null; obj._testBack = null }
     try { if (obj.micRaw) obj.micRaw.getTracks().forEach(t => t.stop()) } catch {}
     if (obj._denoise && obj._denoise._rnnoiseCleanup) { try { obj._denoise._rnnoiseCleanup() } catch {} }
+    if (obj._ngInt) { clearInterval(obj._ngInt); obj._ngInt = null }
     try { if (obj.ctx) await obj.ctx.close() } catch {}
   },
 
@@ -829,6 +867,7 @@ const Voice = {
     pc.ontrack = (e) => {
       const stream = e.streams[0]
       if (!stream) return
+      if (e.track && e.track.kind === 'audio') applyReceiverLatency(pc, !!_settings().lowLatency) // düşük gecikme modu
       if (!m.streams[stream.id]) {
         m.streams[stream.id] = stream
         stream.onaddtrack = () => this.refreshMedia(m)
@@ -1394,6 +1433,17 @@ const Voice = {
       for (const s of m.pc.getSenders()) if (s.track && s.track.kind === 'audio') tuneAudioSender(s)
     }
   },
+  // Düşük gecikme modu: alıcı jitter buffer hedefini kısar → minimum gecikme
+  // (rekabetçi oyun). ÖDÜN: dalgalı ağda biraz daha çıtırtı riski. Opt-in.
+  _applyLatencyMode () {
+    const low = !!_settings().lowLatency
+    for (const m of this.members.values()) {
+      if (!m.pc || !m.pc.getReceivers) continue
+      applyReceiverLatency(m.pc, low)
+    }
+    // Aktif 1-1 arama varsa ona da anında uygula
+    if (window.CallMgr && CallMgr.pc) applyReceiverLatency(CallMgr.pc, low)
+  },
 
   syncTheater (inRoomView) {
     const th = this.el('theater')
@@ -1692,6 +1742,7 @@ const CallMgr = {
     pc.ontrack = (e) => {
       const s = e.streams[0]
       if (!s) return
+      if (e.track && e.track.kind === 'audio') applyReceiverLatency(pc, !!_settings().lowLatency) // düşük gecikme modu
       if (!this.streams[s.id]) {
         this.streams[s.id] = s
         s.onaddtrack = () => this.renderVideos()
@@ -1832,6 +1883,7 @@ const CallMgr = {
       if (this[s]) { this[s].getTracks().forEach(t => t.stop()); this[s] = null }
     }
     if (this._denoise) { this._denoise._rnnoiseCleanup && this._denoise._rnnoiseCleanup(); this._denoise = null }
+    if (this._ngInt) { clearInterval(this._ngInt); this._ngInt = null }
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     if (this.audioEl) { this.audioEl.srcObject = null; this.audioEl = null }

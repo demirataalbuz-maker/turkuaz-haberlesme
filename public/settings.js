@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -237,6 +237,22 @@
       v => TurkuazSettings.set('micLimiter', v)),
       'Bağıran ve fısıldayan aynı seviyede duyulur (pompalamayan kompresör + limiter). "Ses sabitleme" en agresif — oyun için ideal, herkes tutarlı gelir. Bir sonraki katılım/aramada geçerli.'))
     p.appendChild(gHQ)
+
+    // Oyun / düşük gecikme
+    const gGame = group('OYUN / DÜŞÜK GECİKME')
+    const llSwitch = document.createElement('label'); llSwitch.className = 'set-switch'
+    const llCb = document.createElement('input'); llCb.type = 'checkbox'; llCb.checked = !!settings.lowLatency
+    llCb.onchange = () => { TurkuazSettings.set('lowLatency', llCb.checked); if (window.Voice && Voice._applyLatencyMode) Voice._applyLatencyMode() }
+    llSwitch.append(llCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gGame.appendChild(row('Düşük gecikme modu 🎮', llSwitch,
+      'Jitter buffer\'ı kısar → minimum gecikme (rekabetçi oyun). Ödün: dalgalı ağda biraz daha çıtırtı olabilir. Anında geçerli.'))
+    const ngSwitch = document.createElement('label'); ngSwitch.className = 'set-switch'
+    const ngCb = document.createElement('input'); ngCb.type = 'checkbox'; ngCb.checked = !!settings.noiseGate
+    ngCb.onchange = () => TurkuazSettings.set('noiseGate', ngCb.checked)
+    ngSwitch.append(ngCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gGame.appendChild(row('Noise gate 🔇', ngSwitch,
+      'Konuşmadığında mikrofonu tam keser → kimse klavyeni/fanını duymaz. Konuşunca anında açılır. Bir sonraki katılım/aramada geçerli.'))
+    p.appendChild(gGame)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)
     const gVoice = group('SESLİ SOHBET MODU')
