@@ -744,7 +744,7 @@ const Voice = {
     const cur = Math.round(this.memberVol(code) * 100)
     const pop = document.createElement('div')
     pop.id = 'lr-volpop'; pop.className = 'lr-volpop'
-    pop.innerHTML = `<div class="lr-volname">${esc((m && m.name) || 'kişi')}</div>
+    pop.innerHTML = `<div class="lr-volname">${esc(this.dispName(m))}</div>
       <div class="lr-volrow"><span>🔊</span><input type="range" min="0" max="200" value="${cur}"><span class="v">${cur}%</span></div>`
     const stage = this.el('lr-stage'); stage.appendChild(pop)
     pop.style.left = bubbleEl.style.left; pop.style.top = bubbleEl.style.top
@@ -1482,7 +1482,7 @@ const Voice = {
     for (const m of this.members.values()) {
       const s = this.screenStream(m)
       if (s && s.getVideoTracks().some(t => t.readyState === 'live')) {
-        out.push({ key: m.code, name: m.name, stream: s, mine: false })
+        out.push({ key: m.code, name: this.dispName(m), stream: s, mine: false })
       }
     }
     if (this.screen) out.push({ key: 'me', name: 'Kendi ekranın', stream: this.screen, mine: true })
@@ -1625,16 +1625,22 @@ const Voice = {
     if (m.bubble) { m.bubble.style.left = m.pos.x + '%'; m.bubble.style.top = m.pos.y + '%' }
   },
 
+  // Görünen ad: ARKADAŞSA benim listemdeki adım (odada da tutarlı) — #11
+  dispName (m) {
+    if (!m) return 'kişi'
+    return (window.nameForCode ? window.nameForCode(m.code, m.name) : m.name) || 'anon'
+  },
+
   updateBubble (m) {
     if (this.room == null) return
     if (!activeConv || activeConv.type !== 'room' || activeConv.topic !== this.room) return
-    if (!m.bubble || !m.bubble.isConnected) m.bubble = this.makeBubble(m.code, m.name, m.avatar, false)
+    if (!m.bubble || !m.bubble.isConnected) m.bubble = this.makeBubble(m.code, this.dispName(m), m.avatar, false)
     this.positionBubble(m)
     // Medya bağlantısı kurulana kadar ⏳, koparsa ⚠️ — "ses/görüntü niye yok"u görünür kıl
     const st = m.pc.connectionState
     const mark = st === 'connected' ? '' : (st === 'failed' || st === 'disconnected' ? ' ⚠️' : ' ⏳')
     m.bubble.title = mark ? 'medya bağlantısı: ' + st + ' — NAT/güvenlik duvarı engelliyor olabilir (README: ice.json)' : ''
-    m.bubble.querySelector('.lr-name').textContent = m.name + (m.muted ? ' 🔇' : '') + mark
+    m.bubble.querySelector('.lr-name').textContent = this.dispName(m) + (m.muted ? ' 🔇' : '') + mark
     const face = m.bubble.querySelector('.lr-face')
     const vid = m.bubble.querySelector('video')
     const main = this.mainStream(m)

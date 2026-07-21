@@ -260,6 +260,13 @@ function fmtDay (ts) { return new Date(ts).toLocaleDateString('tr-TR', { day: 'n
 function fmtSize (b) { return b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB' }
 function shortCode (code) { return code.slice(0, 8) + '…' + code.slice(-6) }
 function nameOf (f) { return f.name || 'anon-' + f.code.slice(0, 6) }
+// Kodu görünen ada çevir: ARKADAŞSA benim listemdeki adı (benim tanıdığım isim),
+// değilse yayınladığı/verilen ad. Oda ve DM'de tutarlı isim için (#11).
+function nameForCode (code, fallback) {
+  const f = code && state.friends.find(x => x.code === code)
+  return (f && f.name) || fallback || ('anon-' + String(code || '').slice(0, 6))
+}
+window.nameForCode = nameForCode
 
 // Mesaj metni biçimlendirme: önce güvenli kaçış (esc), sonra hafif markdown.
 // Kod blokları/inline kod önce yer-tutucuya alınır ki içlerinde biçimlendirme olmasın.
@@ -463,8 +470,15 @@ function renderMembers () {
   panel.classList.remove('hidden')
   const members = [{ code: state.me.code, name: state.me.name || 'sen', me: true }]
     .concat((r.members || []).filter(m => m.code !== state.me.code))
-  panel.innerHTML = `<div class="ml-title">ÜYELER — ${members.length}</div>` + members.map(m =>
-    `<div class="ml-item">${avatarHTML(avatarOf(m.code), m.name, m.code, true)}<span class="ml-name">${esc(m.name)}${m.me ? ' (sen)' : ''}</span></div>`).join('')
+  panel.innerHTML = `<div class="ml-title">ÜYELER — ${members.length}</div>` + members.map(m => {
+    const nm = m.me ? m.name : nameForCode(m.code, m.name) // arkadaşsa benim adım (#11)
+    return `<div class="ml-item"${m.me ? '' : ` data-code="${esc(m.code)}" data-name="${esc(nm)}" role="button" tabindex="0"`}>${avatarHTML(avatarOf(m.code), nm, m.code, true)}<span class="ml-name">${esc(nm)}${m.me ? ' (sen)' : ''}</span></div>`
+  }).join('')
+  // Kişiye tıkla → menü (Sohbete git / Profil) — #13
+  panel.onclick = (e) => {
+    const item = e.target.closest('.ml-item[data-code]')
+    if (item) personMenu(item.dataset.code, item.dataset.name, item)
+  }
   syncMemberPanel()
 }
 
@@ -515,7 +529,11 @@ function renderChatHead () {
     blk.setAttribute('aria-label', blk.textContent)
     blk.onclick = () => {
       if (isB) send({ t: 'unblock', code: f.code })
-      else if (confirm(nameOf(f) + ' engellensin mi? Mesajları artık gelmeyecek.')) send({ t: 'block', code: f.code })
+      else if (confirm(nameOf(f) + ' engellensin mi? Mesajları artık gelmeyecek.')) {
+        send({ t: 'block', code: f.code })
+        const k = 'dm-' + f.code // engellenince stale okunmamış rozeti kalmasın (#14)
+        if (unread[k]) { delete unread[k]; persistUnread(); syncUnreadUI() }
+      }
     }
     actions.appendChild(blk)
   } else {
@@ -574,10 +592,10 @@ function voiceParticipants (topic) {
   const V = window.Voice
   if (!V) return out
   const seen = V.seen && V.seen.get(topic)
-  if (seen) for (const [code, info] of seen) out.set(code, { code, name: info.name || 'anon' })
+  if (seen) for (const [code, info] of seen) out.set(code, { code, name: nameForCode(code, info.name) })
   if (V.room === topic) {
     out.set(state.me.code, { code: state.me.code, name: state.me.name || 'sen', me: true, muted: V.muted })
-    for (const m of V.members.values()) out.set(m.code, { code: m.code, name: m.name || 'anon', muted: m.muted })
+    for (const m of V.members.values()) out.set(m.code, { code: m.code, name: nameForCode(m.code, m.name), muted: m.muted })
   }
   return out
 }
@@ -599,9 +617,9 @@ function renderSidebarRoom (r, el) {
   const tglabel = document.createElement('span'); tglabel.textContent = 'METİN KANALLARI'; tgt.appendChild(tglabel)
   const addBtn = document.createElement('button'); addBtn.className = 'ch-add-mini'; addBtn.textContent = '+'
   addBtn.title = 'Yeni kanal'; addBtn.setAttribute('aria-label', 'Yeni kanal ekle')
-  addBtn.onclick = () => {
-    const ch = prompt('Kanal adı:')
-    if (ch && ch.trim()) { send({ t: 'add-channel', room: r.topic, ch: ch.trim() }); activeChs[r.topic] = ch.trim().toLowerCase().replace(/[^a-z0-9ğüşöçı_-]/g, '') }
+  addBtn.onclick = async () => {
+    const ch = await askText('Yeni metin kanalı', '', { placeholder: 'kanal-adı', okLabel: 'Oluştur', maxlen: 32 })
+    if (ch) { send({ t: 'add-channel', room: r.topic, ch }); activeChs[r.topic] = ch.toLowerCase().replace(/[^a-z0-9ğüşöçı_-]/g, '') }
   }
   tgt.appendChild(addBtn); tg.appendChild(tgt)
   for (const ch of r.channels) {
@@ -744,6 +762,7 @@ function renderMessages () {
     const pending = pendingIds.has(m.id)
     const hit = !m.deleted && m.from !== state.me.code && mentionsMe(m.text)
     row.className = 'msg-row' + (compact ? ' compact' : '') + (pending ? ' pending' : '') + (hit ? ' mention-hit' : '')
+    if (m.from && m.from !== state.me.code) row.dataset.from = m.from // avatar/isim tıkla → kişi menüsü (#13)
 
     let body = ''
     if (m.deleted) {
@@ -770,8 +789,29 @@ function renderMessages () {
     lastFrom = m.from; lastTs = m.ts
   }
   if (!msgs.length) box.innerHTML = '<div class="empty-hint">Henüz mesaj yok — ilk mesajı sen at 🚀</div>'
-  box.scrollTop = box.scrollHeight
+  scrollBottom(box)
   requestBridgeFiles(box)
+}
+
+// Sağlam dibe-kaydırma: resim/video geç yüklenince yükseklik artıp görünümü
+// ortada bırakıyordu (#14). Dipteysek yükleme sonrası tekrar dibe yapış; kullanıcı
+// yukarı kaydırıp geçmiş okurken yapışmayı bırak (yukarı zıplatma yok).
+function scrollBottom (box) {
+  box._stick = true
+  box.scrollTop = box.scrollHeight
+  if (!box._stickWired) {
+    box._stickWired = true
+    box.addEventListener('scroll', () => {
+      box._stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80
+    })
+  }
+  for (const el of box.querySelectorAll('img, video')) {
+    if (el.dataset._sb) continue
+    el.dataset._sb = '1'
+    const re = () => { if (box._stick) box.scrollTop = box.scrollHeight }
+    el.addEventListener('load', re, { once: true })
+    el.addEventListener('loadeddata', re, { once: true })
+  }
 }
 
 // Mobil (WebView köprüsü): /files/ HTTP yolu yok — resim içeriğini çekirdekten
@@ -853,8 +893,8 @@ function toolsFor (m, conv, room) {
   if (m.from === state.me.code && !m.file) {
     const ed = document.createElement('button')
     ed.textContent = '✏️'; ed.title = 'Düzenle'
-    ed.onclick = () => {
-      const t = prompt('Mesajı düzenle:', m.text)
+    ed.onclick = async () => {
+      const t = await askText('Mesajı düzenle', m.text, { okLabel: 'Kaydet', maxlen: 4000 })
       if (t !== null && t.trim() && t !== m.text) send({ t: 'edit', conv, msgId: m.id, text: t })
     }
     tools.appendChild(ed)
@@ -916,6 +956,50 @@ function openDM (f) {
   render(); renderMessages()
   $('msg-input').focus()
 }
+// ---- Kişi menüsü + profil görünümü (#13) ----
+// Bir isme/avatara tıklayınca küçük menü: "Sohbete git" (arkadaşsa) + "Profil".
+function closePersonMenu () { const m = $('person-menu'); if (m) m.remove() }
+function personMenu (code, name, anchor) {
+  closePersonMenu()
+  if (!code || code === state.me.code) return // kendine menü yok
+  const f = state.friends.find(x => x.code === code)
+  const disp = nameForCode(code, name)
+  const menu = document.createElement('div'); menu.id = 'person-menu'; menu.className = 'person-menu'
+  let html = `<div class="pm-head">${avatarHTML(avatarOf(code), disp, code, true)}<span>${esc(disp)}</span></div>`
+  if (f) html += '<button class="pm-item" data-a="dm">💬 Sohbete git</button>'
+  html += '<button class="pm-item" data-a="profile">👤 Profil</button>'
+  menu.innerHTML = html
+  document.body.appendChild(menu)
+  const r = anchor.getBoundingClientRect()
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px'
+  menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px'
+  const dm = menu.querySelector('[data-a="dm"]'); if (dm) dm.onclick = () => { closePersonMenu(); openDM(f) }
+  menu.querySelector('[data-a="profile"]').onclick = () => { closePersonMenu(); personProfile(code, disp) }
+  setTimeout(() => document.addEventListener('pointerdown', function h (e) {
+    if (!menu.contains(e.target)) { closePersonMenu(); document.removeEventListener('pointerdown', h) }
+  }), 0)
+}
+function personProfile (code, name) {
+  const f = state.friends.find(x => x.code === code)
+  const disp = nameForCode(code, name)
+  const back = document.createElement('div'); back.className = 'modal-back'
+  back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-label', disp + ' profili')
+  const modal = document.createElement('div'); modal.className = 'modal'; modal.style.maxWidth = '360px'
+  const online = f ? (f.online ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı') : '👤 Odadan tanıdık (arkadaş değil)'
+  const bio = f && f.statusText ? `<div class="pp-bio">${esc(f.statusText)}</div>` : ''
+  modal.innerHTML =
+    `<div class="pp-top">${avatarHTML(avatarOf(code), disp, code, true)}<div class="pp-name">${esc(disp)}</div><div class="pp-status">${online}</div>${bio}</div>` +
+    `<div class="pp-code"><span>${esc(shortCode(code))}</span><button class="pp-copy">Kodu kopyala</button></div>` +
+    `<div class="modal-btns">${f ? '<button class="pp-dm primary">💬 Sohbete git</button>' : ''}<button class="cancel">Kapat</button></div>`
+  back.appendChild(modal); document.body.appendChild(back)
+  const close = () => back.remove()
+  modal.querySelector('.cancel').onclick = close
+  back.onclick = (e) => { if (e.target === back) close() }
+  modal.querySelector('.pp-copy').onclick = () => copyText(code)
+  const dm = modal.querySelector('.pp-dm'); if (dm) dm.onclick = () => { close(); openDM(f) }
+  setTimeout(() => modal.querySelector('.cancel').focus(), 0)
+}
+
 function openRoom (r) {
   clearReply()
   hideMentionPop()
@@ -1007,6 +1091,42 @@ function hideModal (id, restoreFocus = true) {
     }
     if (target && target.focus) target.focus()
   }, 0)
+}
+
+// In-app metin girişi — Electron window.prompt() desteklemez (null döner), o yüzden
+// kanal ekleme/mesaj düzenleme gibi yerler bununla çalışır. Promise<string|null> döner.
+function askText (title, initial = '', opts = {}) {
+  const { placeholder = '', okLabel = 'Tamam', maxlen = 200 } = opts
+  return new Promise((resolve) => {
+    const returnFocus = document.activeElement
+    const back = document.createElement('div'); back.className = 'modal-back'
+    back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-label', title)
+    const modal = document.createElement('div'); modal.className = 'modal'; modal.style.maxWidth = '420px'
+    modal.innerHTML =
+      '<h2></h2>' +
+      '<input class="ask-input" type="text" autocomplete="off">' +
+      '<div class="modal-btns"><button class="cancel">Vazgeç</button><button class="ok primary"></button></div>'
+    modal.querySelector('h2').textContent = title
+    const input = modal.querySelector('.ask-input')
+    input.value = initial; input.placeholder = placeholder; input.maxLength = maxlen
+    modal.querySelector('.ok').textContent = okLabel
+    back.appendChild(modal); document.body.appendChild(back)
+    let done = false
+    const finish = (val) => {
+      if (done) return; done = true
+      back.remove()
+      try { if (returnFocus && returnFocus.focus && returnFocus.isConnected) returnFocus.focus() } catch {}
+      resolve(val)
+    }
+    modal.querySelector('.ok').onclick = () => finish(input.value.trim() || null)
+    modal.querySelector('.cancel').onclick = () => finish(null)
+    back.onclick = (e) => { if (e.target === back) finish(null) }
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(input.value.trim() || null) }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(null) }
+    }
+    setTimeout(() => { input.focus(); input.select() }, 0)
+  })
 }
 
 document.addEventListener('keydown', (e) => {
@@ -1200,6 +1320,14 @@ document.addEventListener('pointerdown', (e) => {
 // mesaj gönderme + yazıyor sinyali
 let lastTyping = 0
 let prevWarmT = null
+// Mesajda avatara/isme tıkla → kişi menüsü (Sohbete git / Profil) — #13
+$('messages').addEventListener('click', (e) => {
+  const t = e.target.closest('.avatar, .msg-author')
+  if (!t) return
+  const row = t.closest('.msg-row[data-from]')
+  if (row) personMenu(row.dataset.from, null, t)
+})
+
 $('msg-input').oninput = () => {
   mentionIdx = 0
   renderMentionPop()

@@ -767,6 +767,42 @@ button { font-family: inherit; }
 .modal-btns button.primary { background: var(--grad); color: #06231f; border: 0; }
 .modal-btns button:hover { filter: brightness(1.12); }
 
+/* Kişi menüsü (isme/avatara tıkla) — #13 */
+.person-menu {
+  position: fixed; z-index: 80; min-width: 180px; padding: 6px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.45);
+}
+.pm-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px;
+  font-weight: 700; font-size: 14px; border-bottom: 1px solid var(--line); margin-bottom: 4px;
+}
+.pm-head .avatar { width: 30px; height: 30px; }
+.pm-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: 0;
+  color: var(--tx); padding: 9px 10px; border-radius: 8px; cursor: pointer; font-size: 14px;
+}
+.pm-item:hover { background: var(--bg3); }
+.ml-item[data-code], .msg-row .avatar, .msg-author { cursor: pointer; }
+.msg-author:hover { text-decoration: underline; }
+
+/* Kişi profili görünümü */
+.pp-top { text-align: center; padding: 6px 0 12px; }
+.pp-top .avatar { width: 72px; height: 72px; font-size: 32px; margin: 0 auto 8px; }
+.pp-name { font-size: 20px; font-weight: 800; }
+.pp-status { font-size: 13px; color: var(--tx2); margin-top: 3px; }
+.pp-bio { font-size: 13px; color: var(--tx); margin-top: 8px; padding: 8px; background: var(--bg1); border-radius: 8px; }
+.pp-code {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--bg1); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 12px; font-family: monospace; font-size: 12px; color: var(--tx2);
+}
+.pp-code button {
+  background: var(--bg3); border: 1px solid var(--line); color: var(--tx); cursor: pointer;
+  border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 700;
+}
+.pp-code button:hover { color: var(--tq); border-color: var(--tq); }
+
 #group-friends { max-height: 130px; overflow-y: auto; margin-bottom: 8px; }
 .group-friend { display: block; padding: 4px 2px; font-size: 13px; cursor: pointer; color: var(--tx); }
 #avatar-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
