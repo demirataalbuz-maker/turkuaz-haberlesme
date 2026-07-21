@@ -557,7 +557,10 @@ const Voice = {
   },
 
   // ---- ayar ekranından canlı uygulanan ses kontrolleri ----
-  setOutputVolume (pct) { if (this.master) this.master.gain.value = Math.max(0, Number(pct) || 0) / 100 },
+  setOutputVolume (pct) {
+    if (this.master) this.master.gain.value = Math.max(0, Number(pct) || 0) / 100
+    for (const m of this.members.values()) this._applyElVolume(m) // düz-mod audioEl'leri de güncelle
+  },
   setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
   setSink (id) {
     try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {}
@@ -576,7 +579,10 @@ const Voice = {
     this.userVols()[code] = Number(pct)
     try { localStorage.setItem('turkuaz.uservol', JSON.stringify(this._userVols)) } catch {}
     const m = this.members.get(code)
-    if (m && m.gain) m.gain.gain.value = Math.max(0, Number(pct) || 0) / 100 // senkron: UI/test anında okur
+    if (m) {
+      if (m.gain) m.gain.gain.value = Math.max(0, Number(pct) || 0) / 100 // konumsal yol (senkron: UI/test okur)
+      this._applyElVolume(m) // düz-mod doğrudan oynatma yolu
+    }
   },
 
   // ---- konuşana odak: bir kişiye tıkla → onu yükselt, ötekileri kıs ----
@@ -920,13 +926,22 @@ const Voice = {
     if (!m.srcNode || !m.gain || !m.analyser || !m.spatialGain) return
     try { m.srcNode.disconnect() } catch {}
     try { m.panner.disconnect() } catch {}
-    m.srcNode.connect(m.analyser)
-    // src/panner → spatialGain (odak+bölge) → gain (kullanıcı sesi) → master
+    m.srcNode.connect(m.analyser) // konuşma göstergesi her modda (canlı stream'i analiz eder, çıkışa bağlı olması gerekmez)
     if (this.flat()) {
-      m.srcNode.connect(m.spatialGain) // düz: herkes eşit seviye, konum sesi etkilemez
+      // DÜZ (varsayılan): WebAudio ÇIKIŞ zincirini baypas et — ses doğrudan
+      // audioEl'den çalar → daha az tampon = düşük gecikme + az CPU. Ödünsüz.
+      if (m.audioEl) { m.audioEl.muted = false; this._applyElVolume(m) }
     } else {
+      // KONUMSAL: panner gerektiği için WebAudio zinciri çalar, audioEl susar
+      if (m.audioEl) m.audioEl.muted = true
       m.srcNode.connect(m.panner); m.panner.connect(m.spatialGain)
     }
+  },
+  // Düz modda kullanıcı + ana sesi doğrudan audioEl.volume'a uygula (WebAudio yok)
+  _applyElVolume (m) {
+    if (!m.audioEl) return
+    const master = this.master ? this.master.gain.value : 1
+    m.audioEl.volume = Math.max(0, Math.min(1, this.memberVol(m.code) * master))
   },
   setVoiceMode (mode) {
     mode = mode === 'flat' ? 'flat' : 'spatial'
@@ -1051,6 +1066,12 @@ const Voice = {
         })
         m.rtt = pair && Number.isFinite(pair.currentRoundTripTime) ? pair.currentRoundTripTime : null
         m.jitter = inbound && Number.isFinite(inbound.jitter) ? inbound.jitter : null
+        // Ağız-kulak gecikme tahmini: tek yön ağ (RTT/2) + jitter buffer + işleme payı
+        let jbMs = 0
+        if (inbound && Number.isFinite(inbound.jitterBufferDelay) && inbound.jitterBufferEmittedCount > 0) {
+          jbMs = (inbound.jitterBufferDelay / inbound.jitterBufferEmittedCount) * 1000
+        }
+        m.latencyMs = (m.rtt != null) ? Math.round((m.rtt * 1000) / 2 + jbMs + 8) : null
         if (inbound) {
           const received = Number(inbound.packetsReceived) || 0
           const lost = Math.max(0, Number(inbound.packetsLost) || 0)
@@ -1100,10 +1121,11 @@ const Voice = {
     else if (quality === 'bad') statusText = `${total} kişi · bağlantı zayıf`
     else if (quality === 'warn') statusText = `${total} kişi · bağlantı dalgalı`
     else statusText = `${total} kişi · bağlantı iyi`
+    const lats = peers.map(m => m.latencyMs).filter(Number.isFinite)
     const rtts = peers.map(m => m.rtt).filter(Number.isFinite)
     const losses = peers.map(m => m.loss).filter(Number.isFinite)
     const detail = [
-      rtts.length ? `gecikme ${Math.round(Math.max(...rtts) * 1000)} ms` : '',
+      lats.length ? `gecikme ~${Math.max(...lats)} ms` : (rtts.length ? `RTT ${Math.round(Math.max(...rtts) * 1000)} ms` : ''),
       losses.length ? `kayıp %${Math.max(...losses).toFixed(1)}` : ''
     ].filter(Boolean).join(' · ')
     return { quality, statusText, detail }
