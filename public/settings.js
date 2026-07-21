@@ -6,7 +6,7 @@
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
-    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, theme: 'dark', density: 'cozy', notif: true,
+    vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
@@ -228,6 +228,12 @@
     hqSwitch.append(hqCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gHQ.appendChild(row('Stüdyo modu (yüksek kalite)', hqSwitch,
       'Yankı engelleme + otomatik kazancı kapatır → ham, pompalamayan, temiz ses. YALNIZ KULAKLIKLA kullan — hoparlörde yankı yapar. Bir sonraki katılım/aramada geçerli.'))
+    const limSwitch = document.createElement('label'); limSwitch.className = 'set-switch'
+    const limCb = document.createElement('input'); limCb.type = 'checkbox'; limCb.checked = settings.micLimiter !== false
+    limCb.onchange = () => TurkuazSettings.set('micLimiter', limCb.checked)
+    limSwitch.append(limCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gHQ.appendChild(row('Akıllı seviye (önerilen)', limSwitch,
+      'Pompalayan otomatik kazanç yerine hafif kompresör + limiter: kısık konuşan yükselir, bağıran patlamaz, herkes tutarlı seviyede. Bir sonraki katılım/aramada geçerli.'))
     p.appendChild(gHQ)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)

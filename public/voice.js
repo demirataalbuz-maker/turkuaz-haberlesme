@@ -23,11 +23,12 @@ function micConstraints (forceStandard = false) {
   // Stüdyo (yüksek kalite) modu: AEC + AGC kapalı → ham, temiz, pompalamayan ses.
   // AEC kapalı olduğu için YALNIZ kulaklıkta güvenli (hoparlörde yankı yapar).
   const hq = !!s.micHQ
+  const limiter = s.micLimiter !== false // akıllı seviye açıksa tarayıcı AGC'yi biz devralırız
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
   const audio = {
     echoCancellation: !hq,
     noiseSuppression: forceStandard || (s.noise || 'standard') === 'standard',
-    autoGainControl: !hq
+    autoGainControl: !hq && !limiter // limiter varsa çift işleme olmasın
   }
   if (s.micId) audio.deviceId = { exact: s.micId }
   return { audio }
@@ -231,7 +232,20 @@ async function buildMic (obj) {
   if (head === src && wantsStrong && window.toast) {
     toast('AI gürültü engelleme henüz hazır değil; bu katılımda standart koruma kullanılıyor.', 'warn', 5000)
   }
-  head.connect(obj.inGain); obj.inGain.connect(dest)
+  head.connect(obj.inGain)
+  // Akıllı seviye normalizasyonu: pompalayan tarayıcı AGC yerine hafif kompresör
+  // (kısık konuşanı kaldırır) + limiter (tepeleri yakalar). Tutarlı, rahat seviye
+  // ve pompalama YOK. micLimiter açıkken tarayıcı AGC kapalıdır (çift işleme olmaz).
+  if (_settings().micLimiter !== false) {
+    const comp = obj.ctx.createDynamicsCompressor()
+    comp.threshold.value = -24; comp.knee.value = 30; comp.ratio.value = 3.5; comp.attack.value = 0.015; comp.release.value = 0.28
+    const makeup = obj.ctx.createGain(); makeup.gain.value = 1.7 // kısıkları kaldır
+    const limiter = obj.ctx.createDynamicsCompressor()
+    limiter.threshold.value = -3; limiter.knee.value = 0; limiter.ratio.value = 20; limiter.attack.value = 0.002; limiter.release.value = 0.12
+    obj.inGain.connect(comp); comp.connect(makeup); makeup.connect(limiter); limiter.connect(dest)
+  } else {
+    obj.inGain.connect(dest)
+  }
   return dest.stream
 }
 
