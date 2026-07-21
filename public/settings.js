@@ -5,14 +5,20 @@
   const KEY = 'turkuaz.settings'
   const DEFAULTS = {
     micId: '', spkId: '', camId: '', camRes: '720', inVol: 100, outVol: 100,
-    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: true,
+    noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
     vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, theme: 'dark', density: 'cozy', notif: true,
     speakMode: 'open', vadSens: 50, pttKey: 'Space'
   }
   let settings = load()
 
   function load () {
-    try { return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(KEY) || '{}')) } catch { return Object.assign({}, DEFAULTS) }
+    let s
+    try { s = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(KEY) || '{}')) } catch { return Object.assign({}, DEFAULTS) }
+    // Göç: ekran sesi sistem sesini (=çağrı sesini) de yakalayıp yankı yaptığı için
+    // varsayılan kapatıldı. Eski kullanıcılarda bir kez kapat — yankı bug düzeltmesi.
+    // Kullanıcı sonradan bilerek açarsa uyarıyı görür ve bu göç bir daha çalışmaz.
+    if (!s._screenAudioMigrated) { s.screenAudio = false; s._screenAudioMigrated = true; try { localStorage.setItem(KEY, JSON.stringify(s)) } catch {} }
+    return s
   }
   function persist () { try { localStorage.setItem(KEY, JSON.stringify(settings)) } catch {} }
 
@@ -41,8 +47,7 @@
       setModuleSink(window.Voice, id),
       setModuleSink(window.CallMgr, id),
       setModuleSink(window.Soundboard, id),
-      setMediaSink($('call-remote'), id),
-      setMediaSink($('theater-video'), id)
+      setMediaSink($('call-remote'), id)
     ])
   }
 
@@ -368,7 +373,7 @@
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!settings.screenAudio
     cb.onchange = () => TurkuazSettings.set('screenAudio', cb.checked)
     scrAudio.append(cb, Object.assign(document.createElement('span'), { className: 'set-track' }))
-    gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, 'Sistem sesi Windows\'ta yakalanır; Linux/mac\'te desteklenmiyorsa paylaşım sessiz devam eder.'))
+    gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, '⚠️ Sistem sesinin TAMAMINI yakalar — sesli sohbetteki konuşmalar da yayına gider, karşı taraf kendini duyar (yankı). Sadece bir oyunun/videonun sesini paylaşmak için aç, sonra kapat. Varsayılan kapalı.'))
     gScr.appendChild(row('Video codec',
       selectEl([
         { value: 'auto', label: 'Otomatik (VP8/VP9)' },

@@ -524,11 +524,16 @@ async function main () {
     `(() => { const m = [...Voice.members.values()][0]; return m && m.bubble && m.bubble.querySelector('video').videoWidth > 0 })()`, 20000)
   console.log('PASS: kamera görüntüsü karşı tarafta çözülüyor')
 
-  console.log('--- 4) Ekran paylaşımı odada')
+  console.log('--- 4) Ekran paylaşımı odada (opt-in izleme)')
   await pA.eval(`Voice.toggleScreen().then(() => !!Voice.screen)`)
-  await pB.waitEval('B tiyatroda ekranı görüyor',
-    `!document.getElementById('theater').classList.contains('hidden') && document.getElementById('theater-video').videoWidth > 0`, 20000)
-  console.log('PASS: ekran paylaşımı karşı tarafta oynuyor')
+  // Otomatik açılmaz — B'de önce "İzle" çipi belirir (opt-in)
+  await pB.waitEval('B için yayın çipi belirdi',
+    `document.querySelectorAll('#stream-bar .stream-chip').length > 0`, 20000)
+  // B çipe basar → yüzer panel açılır ve video çözülür
+  await pB.eval(`(() => { const m = [...Voice.members.values()][0]; Voice._watchStream(m.code); return true })()`)
+  await pB.waitEval('B panelde ekranı görüyor',
+    `(() => { const v = document.querySelector('.stream-panel video'); return v && v.videoWidth > 0 })()`, 20000)
+  console.log('PASS: opt-in yayın paneli karşı tarafta oynuyor')
 
   console.log('--- 4b) Kişi-bazlı ses ayarı + tam ekran butonu')
   const volOk = await pB.eval(`(() => {
@@ -537,10 +542,10 @@ async function main () {
     return Math.round(m.gain.gain.value * 100)
   })()`)
   if (volOk !== 40) fail('kişi-bazlı ses uygulanmadı: ' + volOk)
-  const fsBtn = await pB.eval(`!!document.getElementById('theater-full') && typeof document.getElementById('theater-video').requestFullscreen === 'function'`)
+  const fsBtn = await pB.eval(`(() => { const p = document.querySelector('.stream-panel'); return !!(p && p.querySelector('.sp-full') && typeof p.requestFullscreen === 'function') })()`)
   if (!fsBtn) fail('tam ekran butonu/API yok')
   // GERÇEK tam ekran: izin (fullscreen) verilmezse burada reddedilir
-  const fsRes = await pB.eval(`document.getElementById('theater-video').requestFullscreen().then(() => 'OK').catch(e => 'ERR:' + e.message)`, { userGesture: true })
+  const fsRes = await pB.eval(`document.querySelector('.stream-panel').requestFullscreen().then(() => 'OK').catch(e => 'ERR:' + e.message)`, { userGesture: true })
   if (fsRes !== 'OK') fail('requestFullscreen reddedildi: ' + fsRes)
   const fsOn = await pB.eval("!!document.fullscreenElement")
   await pB.eval("document.exitFullscreen().catch(() => {}); true")

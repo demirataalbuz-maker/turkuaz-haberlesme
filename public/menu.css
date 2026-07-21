@@ -290,7 +290,6 @@ button:disabled { cursor: not-allowed; }
 
 /* Living-room and share stages leave a usable message area at every window height. */
 #lr-stage { height: clamp(170px, 30dvh, 260px); }
-#theater video { max-height: clamp(150px, 28dvh, 280px); }
 #lr-controls {
   min-height: 50px; background: color-mix(in srgb, var(--bg1) 90%, transparent);
   border-top: 1px solid var(--line);
@@ -503,18 +502,16 @@ button.screen-opt { padding: 0; color: var(--tx); text-align: left; font: inheri
   #btn-menu { width: 44px; height: 44px; }
   .modal-btns button, .set-btn { min-height: 44px; }
   #call-btns button { width: 44px; height: 44px; }
-  #theater-full { width: 44px; height: 44px; }
+  .sp-actions button { width: 40px; height: 40px; }
   #update-bar a, #update-bar button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 
 @media (max-height: 650px) {
   #lr-stage { height: clamp(115px, 27dvh, 175px); }
-  #theater video { max-height: clamp(90px, 23dvh, 150px); }
   .lr-hint { display: none; }
   #lr-controls { min-height: 44px; padding-top: 5px; padding-bottom: 5px; }
   #lr-controls { flex-wrap: nowrap; overflow-x: auto; }
   #lr-controls button { flex: 0 0 auto; }
-  #livingroom:has(+ #theater:not(.hidden)) #lr-stage { display: none; }
 }
 
 @media (max-width: 760px) {

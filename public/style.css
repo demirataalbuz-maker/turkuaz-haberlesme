@@ -645,19 +645,59 @@ button { font-family: inherit; }
 #lr-controls button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 /* ================= ekran sahnesi ================= */
-#theater { position: relative; background: #000; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-#theater video { width: 100%; max-height: 340px; display: block; object-fit: contain; }
-#theater-label {
-  position: absolute; left: 10px; bottom: 10px;
-  background: rgba(8, 17, 15, .8); border-radius: 8px; padding: 3px 10px;
-  font-size: 12px; font-weight: 700; color: var(--tq);
+/* Aktif yayınlar çubuğu — opt-in "İzle" çipleri */
+#stream-bar {
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  background: var(--bg2); border-bottom: 1px solid var(--line); flex-shrink: 0;
 }
-#theater-full {
-  position: absolute; right: 10px; bottom: 10px;
-  background: rgba(8, 17, 15, .8); border: 1px solid var(--line); color: var(--tx);
-  border-radius: 8px; width: 32px; height: 28px; cursor: pointer; font-size: 15px;
+.stream-chip {
+  background: var(--tq); color: #06110d; border: none; border-radius: 20px;
+  padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: filter .12s, transform .12s;
 }
-#theater-full:hover { color: var(--tq); border-color: var(--tq); }
+.stream-chip:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.stream-chip.mine { background: var(--bg3); color: var(--tx); border: 1px solid var(--line); }
+
+/* Yüzer, sürüklenebilir ve boyutlandırılabilir yayın paneli */
+.stream-panel {
+  position: fixed; z-index: 60; width: 480px; height: 320px;
+  background: #000; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(0,0,0,.55); display: flex; flex-direction: column;
+  overflow: hidden; min-width: 220px; min-height: 150px;
+}
+.stream-panel.dragging { opacity: .92; }
+.sp-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 8px 5px 12px; background: var(--bg2); cursor: grab; user-select: none;
+  border-bottom: 1px solid var(--line);
+}
+.sp-head:active { cursor: grabbing; }
+.sp-label { font-size: 12px; font-weight: 700; color: var(--tq); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.sp-actions button {
+  background: transparent; border: 1px solid transparent; color: var(--tx);
+  width: 28px; height: 26px; border-radius: 7px; cursor: pointer; font-size: 14px; line-height: 1;
+}
+.sp-actions button:hover { background: var(--bg3); border-color: var(--line); }
+.sp-close:hover { color: #ff6b6b; }
+.sp-body { flex: 1; min-height: 0; background: #000; display: flex; }
+.sp-body video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.sp-ctrl {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--bg2); border-top: 1px solid var(--line);
+}
+.sp-ctrl .sp-ico { font-size: 13px; flex-shrink: 0; }
+.sp-ctrl input[type=range] { flex: 1; min-width: 40px; accent-color: var(--tq); cursor: pointer; }
+.sp-resize {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--line) 50%, var(--line) 60%, transparent 60%, transparent 72%, var(--line) 72%, var(--line) 82%, transparent 82%);
+}
+/* Tam ekran: temiz — kontroller görünür kalsın, "kaçak site" hissi gitsin (#4) */
+.stream-panel:fullscreen { width: 100vw !important; height: 100vh !important; border: none; border-radius: 0; }
+.stream-panel:fullscreen .sp-head { padding: 10px 18px; background: rgba(8,17,15,.72); }
+.stream-panel:fullscreen .sp-label { font-size: 15px; }
+.stream-panel:fullscreen .sp-ctrl { background: rgba(8,17,15,.72); padding: 10px 18px; }
+.stream-panel:fullscreen .sp-resize { display: none; }
 
 /* kişi-bazlı ses popover'ı (balona sağ tıkla) */
 .lr-volpop {

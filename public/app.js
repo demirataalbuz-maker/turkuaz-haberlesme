@@ -1578,7 +1578,7 @@ function syncDrawerButton () {
     el.inert = mobile && !open
     el.setAttribute('aria-hidden', mobile && !open ? 'true' : 'false')
   }
-  for (const id of ['messages', 'composer', 'channel-tabs', 'chat-actions', 'livingroom', 'theater']) {
+  for (const id of ['messages', 'composer', 'channel-tabs', 'chat-actions', 'livingroom', 'stream-bar']) {
     const el = $(id)
     if (el) el.inert = open
   }

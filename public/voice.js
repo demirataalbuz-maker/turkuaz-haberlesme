@@ -441,6 +441,8 @@ const Voice = {
   joining: false,
   seen: new Map(),
   _myAnalyser: null,
+  _watching: new Set(),        // izlediğim yayınların anahtarları (üye kodu | 'me')
+  _streamPanels: new Map(),    // anahtar -> { el, video, label }
 
   code () { return state.me.code },
 
@@ -572,6 +574,7 @@ const Voice = {
     this.statsTimer = null
     clearInterval(this._speakInt)
     this._stopGate()
+    this._clearStreamPanels()
     for (const code of [...this.members.keys()]) this.removeMember(code)
     for (const s of ['mic', 'micRaw', 'cam', 'screen']) {
       if (this[s]) { this[s].getTracks().forEach(t => { t.onended = null; t.stop() }); this[s] = null }
@@ -650,8 +653,10 @@ const Voice = {
   setInputVolume (pct) { if (this.inGain) this.inGain.gain.value = Math.max(0, Number(pct) || 0) / 100 },
   setSink (id) {
     try { if (this.ctx && this.ctx.setSinkId) this.ctx.setSinkId(id || '').catch(() => {}) } catch {}
-    const theater = this.el('theater-video')
-    try { if (theater && theater.setSinkId) theater.setSinkId(id || '').catch(() => {}) } catch {}
+    // izlenen yayın panellerini de yeni hoparlöre yönlendir
+    for (const p of this._streamPanels.values()) {
+      try { if (p.video.setSinkId) p.video.setSinkId(id || '').catch(() => {}) } catch {}
+    }
   },
 
   // ---- Discord-tarzı mikrofon testi (kendini duy) ----
@@ -1376,7 +1381,7 @@ const Voice = {
     if (!lr) return
     const inRoomView = activeConv && activeConv.type === 'room'
     lr.classList.toggle('hidden', !inRoomView)
-    this.syncTheater(inRoomView)
+    this.syncStreams(inRoomView)
     if (!inRoomView) return
     const topic = activeConv.topic
     const active = this.room === topic
@@ -1445,26 +1450,150 @@ const Voice = {
     if (window.CallMgr && CallMgr.pc) applyReceiverLatency(CallMgr.pc, low)
   },
 
-  syncTheater (inRoomView) {
-    const th = this.el('theater')
-    if (!th) return
-    let stream = null; let label = ''
-    if (inRoomView && this.room === activeConv.topic) {
-      for (const m of this.members.values()) {
-        const s = this.screenStream(m)
-        if (s && s.getVideoTracks().some(t => t.readyState === 'live')) { stream = s; label = m.name + ' ekranını paylaşıyor'; break }
-      }
-      if (!stream && this.screen) { stream = this.screen; label = 'Ekranını paylaşıyorsun' }
+  // ---- Yayın izleme: opt-in, çoklu, taşınabilir/boyutlandırılabilir paneller ----
+  // Otomatik açılmaz; "İzle" çipine basınca panel açılır, ✕ ile çıkılır.
+  syncStreams (inRoomView) {
+    const bar = this.el('stream-bar')
+    if (!bar) return
+    const active = inRoomView && this.room === activeConv.topic
+    const avail = active ? this._availableStreams() : []
+    const availKeys = new Set(avail.map(a => a.key))
+    // Artık yayında olmayan izlediklerimi bırak (yayan durdurdu/çıktı)
+    for (const key of [...this._watching]) if (!availKeys.has(key)) this._unwatchStream(key)
+    // Çubuk: izlenmeyen her yayın için "İzle" çipi (opt-in — sormadan açmaz)
+    bar.innerHTML = ''
+    const chips = avail.filter(a => !this._watching.has(a.key))
+    bar.classList.toggle('hidden', chips.length === 0)
+    for (const a of chips) {
+      const chip = document.createElement('button')
+      chip.className = 'stream-chip' + (a.mine ? ' mine' : '')
+      chip.innerHTML = a.mine
+        ? '🖥️ Kendi ekranını önizle'
+        : '▶️ <b>' + esc(a.name) + '</b> yayında — İzle'
+      chip.onclick = () => this._watchStream(a.key)
+      bar.appendChild(chip)
     }
-    th.classList.toggle('hidden', !stream)
-    const v = this.el('theater-video')
-    if (stream && v.srcObject !== stream) v.srcObject = stream
-    if (stream && v.setSinkId) v.setSinkId(_settings().spkId || '').catch(() => {})
-    if (!stream) v.srcObject = null
-    // Karşıdan gelen ekran SESİ buradan çalınır; kendi paylaşımın yankı yapmasın diye sessiz
-    v.muted = !stream || stream === this.screen || !stream.getAudioTracks().length
-    v.volume = Math.min(1, (Number(_settings().outVol) || 100) / 100)
-    this.el('theater-label').textContent = label
+    // İzlenen her yayın için panel garanti et + güncelle
+    for (const a of avail) if (this._watching.has(a.key)) this._ensureStreamPanel(a)
+  },
+
+  _availableStreams () {
+    const out = []
+    for (const m of this.members.values()) {
+      const s = this.screenStream(m)
+      if (s && s.getVideoTracks().some(t => t.readyState === 'live')) {
+        out.push({ key: m.code, name: m.name, stream: s, mine: false })
+      }
+    }
+    if (this.screen) out.push({ key: 'me', name: 'Kendi ekranın', stream: this.screen, mine: true })
+    return out
+  },
+
+  _watchStream (key) { this._watching.add(key); this.sync() },
+  _unwatchStream (key) { this._watching.delete(key); this._removeStreamPanel(key) },
+  _removeStreamPanel (key) {
+    const p = this._streamPanels.get(key)
+    if (!p) return
+    try { if (document.fullscreenElement === p.el) document.exitFullscreen().catch(() => {}) } catch {}
+    try { p.video.srcObject = null } catch {}
+    p.el.remove()
+    this._streamPanels.delete(key)
+  },
+  _clearStreamPanels () {
+    for (const key of [...this._streamPanels.keys()]) this._removeStreamPanel(key)
+    this._watching.clear()
+    const bar = this.el('stream-bar'); if (bar) { bar.innerHTML = ''; bar.classList.add('hidden') }
+  },
+
+  _ensureStreamPanel (a) {
+    let p = this._streamPanels.get(a.key)
+    if (!p) { p = this._makeStreamPanel(a); this._streamPanels.set(a.key, p) }
+    if (p.video.srcObject !== a.stream) p.video.srcObject = a.stream
+    // Kendi ekranın sessiz (yankı yok); uzak yayının sesi panelden çalınır
+    p.video.muted = a.mine || !a.stream.getAudioTracks().length
+    if (!a.mine && p.video.setSinkId) p.video.setSinkId(_settings().spkId || '').catch(() => {})
+    p.label.textContent = a.mine ? '🖥️ Kendi ekranın (önizleme)' : (a.name + ' — yayın')
+  },
+
+  _makeStreamPanel (a) {
+    const el = document.createElement('div')
+    el.className = 'stream-panel'
+    const n = this._streamPanels.size
+    el.style.left = (90 + n * 30) + 'px'
+    el.style.top = (90 + n * 30) + 'px'
+    el.innerHTML =
+      '<div class="sp-head"><span class="sp-label"></span>' +
+      '<span class="sp-actions">' +
+      '<button class="sp-full" title="Tam ekran (çift tıkla)">⛶</button>' +
+      '<button class="sp-close" title="Yayından çık">✕</button>' +
+      '</span></div>' +
+      '<div class="sp-body"><video autoplay playsinline></video></div>' +
+      '<div class="sp-ctrl">' +
+      '<span class="sp-ico" title="Parlaklık">🔆</span><input class="sp-bright" type="range" min="30" max="170" value="100">' +
+      '<span class="sp-ico" title="Ses">🔊</span><input class="sp-vol" type="range" min="0" max="150" value="100">' +
+      '</div>' +
+      '<div class="sp-resize" title="Boyutlandır"></div>'
+    document.body.appendChild(el)
+    const video = el.querySelector('video')
+    const label = el.querySelector('.sp-label')
+    const bright = el.querySelector('.sp-bright')
+    const vol = el.querySelector('.sp-vol')
+    video.volume = Math.min(1, (Number(_settings().outVol) || 100) / 100)
+    // Parlaklık: izleyici tarafı, CSS filtresi (yayına dokunmaz) — #17
+    const applyBright = () => { video.style.filter = 'brightness(' + (bright.value / 100) + ')' }
+    bright.oninput = applyBright; applyBright()
+    // Ses: panel-bazlı
+    vol.oninput = () => { video.volume = Math.min(1, vol.value / 100) }
+    // ✕ = yayından çık
+    el.querySelector('.sp-close').onclick = () => this._unwatchStream(a.key)
+    // Tam ekran aç/kapa — temiz overlay (#4)
+    const full = el.querySelector('.sp-full')
+    full.onclick = () => {
+      if (document.fullscreenElement === el) { document.exitFullscreen().catch(() => {}) } else if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
+    }
+    video.ondblclick = () => full.click()
+    this._makePanelDraggable(el, el.querySelector('.sp-head'))
+    this._makePanelResizable(el, el.querySelector('.sp-resize'))
+    return { el, video, label }
+  },
+
+  _makePanelDraggable (el, handle) {
+    let sx, sy, ox, oy, drag = false
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button, input')) return
+      drag = true; sx = e.clientX; sy = e.clientY
+      const r = el.getBoundingClientRect(); ox = r.left; oy = r.top
+      try { handle.setPointerCapture(e.pointerId) } catch {}
+      el.classList.add('dragging')
+    })
+    handle.addEventListener('pointermove', (e) => {
+      if (!drag) return
+      let x = ox + (e.clientX - sx); let y = oy + (e.clientY - sy)
+      x = Math.max(0, Math.min(x, window.innerWidth - 90))
+      y = Math.max(0, Math.min(y, window.innerHeight - 40))
+      el.style.left = x + 'px'; el.style.top = y + 'px'
+    })
+    const end = (e) => { drag = false; el.classList.remove('dragging'); try { handle.releasePointerCapture(e.pointerId) } catch {} }
+    handle.addEventListener('pointerup', end)
+    handle.addEventListener('pointercancel', end)
+  },
+
+  _makePanelResizable (el, handle) {
+    let sx, sy, sw, sh, rz = false
+    handle.addEventListener('pointerdown', (e) => {
+      rz = true; sx = e.clientX; sy = e.clientY
+      const r = el.getBoundingClientRect(); sw = r.width; sh = r.height
+      try { handle.setPointerCapture(e.pointerId) } catch {}
+      e.stopPropagation()
+    })
+    handle.addEventListener('pointermove', (e) => {
+      if (!rz) return
+      el.style.width = Math.max(220, sw + (e.clientX - sx)) + 'px'
+      el.style.height = Math.max(150, sh + (e.clientY - sy)) + 'px'
+    })
+    const end = (e) => { rz = false; try { handle.releasePointerCapture(e.pointerId) } catch {} }
+    handle.addEventListener('pointerup', end)
+    handle.addEventListener('pointercancel', end)
   },
 
   makeBubble (code, name, avatar, mine) {
@@ -1982,10 +2111,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return }
     if (el && el.srcObject && el.requestFullscreen) el.requestFullscreen().catch(e => console.error('tam ekran:', e))
   }
-  const theaterVid = document.getElementById('theater-video')
-  const theaterFull = document.getElementById('theater-full')
-  if (theaterFull) theaterFull.onclick = () => fs(theaterVid)
-  if (theaterVid) theaterVid.ondblclick = () => fs(theaterVid)
   const callRemote = document.getElementById('call-remote')
   if (callRemote) callRemote.ondblclick = () => fs(callRemote)
 
