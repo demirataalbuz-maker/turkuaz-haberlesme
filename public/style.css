@@ -630,8 +630,8 @@ button { font-family: inherit; }
   box-shadow: 0 0 0 4px rgba(45, 212, 191, .55), 0 6px 20px rgba(0, 0, 0, .5);
 }
 /* Konuşurken avatarın arkasında dönen animasyonlu ring (#1 "hareketli animasyon") */
+/* NOT: .lr-bubble zaten position:absolute — ::before için konum bağlamı hazır. */
 @keyframes tq-ring-spin { to { transform: translateX(-50%) rotate(1turn); } }
-.lr-bubble { position: relative; }
 .lr-face { z-index: 1; }
 .lr-face-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .lr-bubble.speaking::before {
