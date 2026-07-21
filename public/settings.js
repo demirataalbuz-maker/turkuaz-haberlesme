@@ -289,16 +289,28 @@
     const gTest = group('MİKROFON TESTİ')
     const testBtn = document.createElement('button')
     testBtn.className = 'set-btn'
-    testBtn.textContent = '🎙️ Testi başlat'
+    testBtn.textContent = '🎧 Kendini dinle'
     const meter = document.createElement('div')
     meter.className = 'set-meter'
     meter.innerHTML = '<div class="set-meter-fill" id="set-meter-fill"></div>'
-    testBtn.onclick = () => {
-      if (testStream) { stopMicTest(); testBtn.textContent = '🎙️ Testi başlat' } else { startMicTest(); testBtn.textContent = '⏹️ Testi durdur' }
+    let selfTesting = false
+    testBtn.onclick = async () => {
+      const fill = $('set-meter-fill')
+      if (selfTesting) {
+        if (window.Voice) await Voice.micSelfTestStop()
+        selfTesting = false; testBtn.textContent = '🎧 Kendini dinle'
+        if (fill) fill.style.width = '0%'
+      } else {
+        if (!window.Voice) return
+        testBtn.disabled = true; testBtn.textContent = '⏳ Hazırlanıyor…'
+        const ok = await Voice.micSelfTest(lvl => { if (fill) fill.style.width = lvl + '%' })
+        testBtn.disabled = false
+        if (ok) { selfTesting = true; testBtn.textContent = '⏹️ Durdur' } else { testBtn.textContent = '🎧 Kendini dinle' }
+      }
     }
     const tr = document.createElement('div'); tr.className = 'set-row'
     const tl = document.createElement('div'); tl.className = 'set-label'
-    tl.innerHTML = '<div>Konuş, çubuk oynasın</div><div class="set-hint">Seçtiğin mikrofon ve giriş seviyesiyle.</div>'
+    tl.innerHTML = '<div>Kendini duy 🎧</div><div class="set-hint">Karşının duyduğu sesi — <b>gürültü engelleme + akıllı seviye + stüdyo modu dahil</b> — sen duyarsın. <b>KULAKLIK tak</b> (hoparlörde yankı yapar). Ayarları değiştir, farkı anında duy.</div>'
     const trc = document.createElement('div'); trc.append(testBtn, meter)
     tr.append(tl, trc); gTest.appendChild(tr)
     p.appendChild(gTest)
@@ -383,6 +395,7 @@
       if (testStream._ctx) testStream._ctx.close().catch(() => {})
       testStream = null
     }
+    if (window.Voice && Voice.micSelfTestStop) Voice.micSelfTestStop() // panel kapanınca "kendini duy"u da durdur
     const fill = $('set-meter-fill'); if (fill) fill.style.width = '0%'
   }
 

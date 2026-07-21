@@ -602,6 +602,45 @@ const Voice = {
     try { if (theater && theater.setSinkId) theater.setSinkId(id || '').catch(() => {}) } catch {}
   },
 
+  // ---- Discord-tarzı mikrofon testi (kendini duy) ----
+  // Gerçek GÖNDERİM zincirinden (DFN/RNNoise + akıllı seviye + stüdyo modu) geçip
+  // karşının duyacağı sesi SEN duyarsın → ikinci kişiye gerek yok, tüm ses işlemeyi
+  // tek başına test edersin. Kulaklık şart (hoparlörde geri besleme yankısı yapar).
+  async micSelfTest (onLevel) {
+    await this.micSelfTestStop()
+    const obj = {}
+    let stream
+    try { stream = await buildMic(obj) } catch (e) {
+      if (window.toast) toast('Mikrofona erişilemedi: ' + e.message, 'error', 5000)
+      return false
+    }
+    this._test = obj
+    const back = new Audio(); back.srcObject = stream; back.play().catch(() => {})
+    try { const spk = _settings().spkId; if (spk && back.setSinkId) back.setSinkId(spk).catch(() => {}) } catch {}
+    obj._testBack = back
+    const an = obj.ctx.createAnalyser(); an.fftSize = 256
+    obj.ctx.createMediaStreamSource(stream).connect(an)
+    const buf = new Uint8Array(an.fftSize)
+    const tick = () => {
+      an.getByteTimeDomainData(buf)
+      let dev = 0; for (const v of buf) dev = Math.max(dev, Math.abs(v - 128))
+      if (onLevel) onLevel(Math.min(100, (dev / 90) * 100))
+      obj._testRaf = requestAnimationFrame(tick)
+    }
+    tick()
+    return true
+  },
+  async micSelfTestStop () {
+    const obj = this._test
+    if (!obj) return
+    this._test = null
+    if (obj._testRaf) cancelAnimationFrame(obj._testRaf)
+    if (obj._testBack) { try { obj._testBack.pause() } catch {}; obj._testBack.srcObject = null; obj._testBack = null }
+    try { if (obj.micRaw) obj.micRaw.getTracks().forEach(t => t.stop()) } catch {}
+    if (obj._denoise && obj._denoise._rnnoiseCleanup) { try { obj._denoise._rnnoiseCleanup() } catch {} }
+    try { if (obj.ctx) await obj.ctx.close() } catch {}
+  },
+
   // ---- kişi-bazlı ses (Discord gibi her katılımcı ayrı ayarlanır) ----
   _userVols: null,
   userVols () {
