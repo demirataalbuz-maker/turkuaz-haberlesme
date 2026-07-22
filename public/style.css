@@ -882,6 +882,16 @@ button { font-family: inherit; }
 #avatar-grid .av-imgopt { overflow: hidden; padding: 0; }
 #avatar-grid .av-imgopt img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
 
+/* Discord-tarzı avatar kırpma editörü */
+.crop-wrap { position: relative; width: 260px; height: 260px; margin: 4px auto 14px; border-radius: 12px; overflow: hidden; background: #000; touch-action: none; }
+.crop-cv { display: block; cursor: grab; }
+.crop-cv:active { cursor: grabbing; }
+.crop-ring { position: absolute; inset: 0; pointer-events: none; }
+.crop-ring::before { content: ''; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,255,255,.85); }
+.crop-zoom { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.crop-zoom span { font-size: 15px; }
+.crop-range { flex: 1; accent-color: var(--tq); cursor: pointer; }
+
 .modal.ring { text-align: center; width: 340px; }
 .ring-avatar {
   width: 84px; height: 84px; border-radius: 50%; margin: 0 auto 12px;

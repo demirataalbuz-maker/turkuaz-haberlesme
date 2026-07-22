@@ -1169,31 +1169,72 @@ document.addEventListener('keydown', (e) => {
 
 // ---- profil ----
 let selAvatar = ''
-// Kendi resmini avatar yap: 96x96 kare kırp → JPEG data-URL (≤20KB, P2P'de yayılır)
+// Kendi resmini avatar yap: dosya seç → Discord-tarzı kırpma (kaydır+yakınlaştır) → JPEG data-URL
 function pickAvatarImage () {
   const inp = document.createElement('input')
   inp.type = 'file'; inp.accept = 'image/png,image/jpeg,image/webp'
-  inp.onchange = () => {
+  inp.onchange = async () => {
     const file = inp.files && inp.files[0]
     if (!file) return
+    const data = await cropAvatarImage(file)
+    if (data) { selAvatar = data; renderAvatarGrid() } // openProfile DEGIL — secimi bozar
+  }
+  inp.click()
+}
+// Discord-tarzı kırpma editörü: resmi yuvarlak çerçeve içinde sürükle + yakınlaştır,
+// "Uygula" ile görünen kare kırpılır (avatar zaten daire olarak gösterilir). Promise<dataURL|null>.
+function cropAvatarImage (file) {
+  return new Promise((resolve) => {
     const img = new Image()
     const url = URL.createObjectURL(file)
     img.onload = () => {
-      URL.revokeObjectURL(url)
-      const S = 96
-      const cv = document.createElement('canvas'); cv.width = S; cv.height = S
-      const side = Math.min(img.width, img.height)
-      cv.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S)
-      let data = cv.toDataURL('image/jpeg', 0.72)
-      if (data.length > 20000) data = cv.toDataURL('image/jpeg', 0.5)
-      if (data.length > 20000) { if (window.toast) toast('Resim çok büyük — daha küçük/basit bir resim dene', 'error', 5000); return }
-      selAvatar = data
-      renderAvatarGrid() // openProfile DEGIL — yoksa secim kayitliya geri doner
+      const V = 260; const OUT = 128 // önizleme / çıktı boyutu
+      const base = Math.max(V / img.width, V / img.height) // 'cover'
+      let scale = 1
+      let ox = (V - img.width * base) / 2; let oy = (V - img.height * base) / 2
+      const back = document.createElement('div'); back.className = 'modal-back'
+      back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true'); back.setAttribute('aria-label', 'Resmi kırp')
+      const modal = document.createElement('div'); modal.className = 'modal'; modal.style.maxWidth = '320px'
+      modal.innerHTML =
+        '<h2>Resmi ayarla</h2>' +
+        '<div class="crop-wrap"><canvas class="crop-cv" width="' + V + '" height="' + V + '"></canvas><div class="crop-ring"></div></div>' +
+        '<div class="crop-zoom"><span>🔍</span><input class="crop-range" type="range" min="100" max="400" value="100"></div>' +
+        '<div class="modal-btns"><button class="cancel">Vazgeç</button><button class="ok primary">Uygula</button></div>'
+      back.appendChild(modal); document.body.appendChild(back)
+      const cv = modal.querySelector('.crop-cv'); const ctx = cv.getContext('2d')
+      const range = modal.querySelector('.crop-range')
+      const clamp = () => {
+        const w = img.width * base * scale; const h = img.height * base * scale
+        ox = Math.min(0, Math.max(V - w, ox)); oy = Math.min(0, Math.max(V - h, oy))
+      }
+      const draw = () => { clamp(); ctx.clearRect(0, 0, V, V); ctx.drawImage(img, ox, oy, img.width * base * scale, img.height * base * scale) }
+      draw()
+      range.oninput = () => {
+        const ns = range.value / 100; const c = V / 2
+        ox = c - (c - ox) * (ns / scale); oy = c - (c - oy) * (ns / scale); scale = ns; draw()
+      }
+      let drag = false; let sx; let sy; let sox; let soy
+      cv.addEventListener('pointerdown', (e) => { drag = true; sx = e.clientX; sy = e.clientY; sox = ox; soy = oy; try { cv.setPointerCapture(e.pointerId) } catch {} })
+      cv.addEventListener('pointermove', (e) => { if (!drag) return; ox = sox + (e.clientX - sx); oy = soy + (e.clientY - sy); draw() })
+      const endDrag = () => { drag = false }
+      cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag)
+      const finish = (val) => { URL.revokeObjectURL(url); back.remove(); resolve(val) }
+      modal.querySelector('.cancel').onclick = () => finish(null)
+      back.onclick = (e) => { if (e.target === back) finish(null) }
+      modal.querySelector('.ok').onclick = () => {
+        const out = document.createElement('canvas'); out.width = OUT; out.height = OUT
+        const f = OUT / V
+        out.getContext('2d').drawImage(img, ox * f, oy * f, img.width * base * scale * f, img.height * base * scale * f)
+        let data = out.toDataURL('image/jpeg', 0.72)
+        if (data.length > 20000) data = out.toDataURL('image/jpeg', 0.5)
+        if (data.length > 20000) { if (window.toast) toast('Resim çok büyük — daha küçük bir resim dene', 'error', 5000); return }
+        finish(data)
+      }
+      setTimeout(() => modal.querySelector('.ok').focus(), 0)
     }
-    img.onerror = () => { URL.revokeObjectURL(url); if (window.toast) toast('Resim okunamadı', 'error') }
+    img.onerror = () => { URL.revokeObjectURL(url); if (window.toast) toast('Resim okunamadı', 'error'); resolve(null) }
     img.src = url
-  }
-  inp.click()
+  })
 }
 function openProfile () {
   $('profile-name').value = state.me.name
