@@ -1188,7 +1188,7 @@ function pickAvatarImage () {
       if (data.length > 20000) data = cv.toDataURL('image/jpeg', 0.5)
       if (data.length > 20000) { if (window.toast) toast('Resim çok büyük — daha küçük/basit bir resim dene', 'error', 5000); return }
       selAvatar = data
-      openProfile()
+      renderAvatarGrid() // openProfile DEGIL — yoksa secim kayitliya geri doner
     }
     img.onerror = () => { URL.revokeObjectURL(url); if (window.toast) toast('Resim okunamadı', 'error') }
     img.src = url
@@ -1200,8 +1200,16 @@ function openProfile () {
   $('profile-status').value = state.me.status || ''
   selAvatar = state.me.avatar || ''
   $('btn-close-profile').hidden = !state.me.name
+  renderAvatarGrid()
+  showModal('modal-profile', 'profile-name')
+}
+// Grid'i çiz. Seçim tıklamaları BUNU çağırır — selAvatar'ı sıfırlamaz, isim alanına
+// dokunmaz. (BUG: eskiden seçince openProfile çağrılıyordu, o da selAvatar'ı kayıtlı
+// avatara geri döndürüyordu → seçim hiç tutmuyordu, "avatar seçimi çalışmıyor".)
+function renderAvatarGrid () {
   const grid = $('avatar-grid')
   grid.innerHTML = ''
+  const focusSel = () => setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0)
   const none = document.createElement('button')
   none.type = 'button'
   none.className = 'av-opt' + (selAvatar === '' ? ' sel' : '')
@@ -1209,7 +1217,7 @@ function openProfile () {
   none.style.fontSize = '14px'
   none.title = 'Baş harfini kullan'
   none.setAttribute('aria-pressed', selAvatar === '' ? 'true' : 'false')
-  none.onclick = () => { selAvatar = ''; openProfile(); setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0) }
+  none.onclick = () => { selAvatar = ''; renderAvatarGrid(); focusSel() }
   grid.appendChild(none)
   // Resim yükle (#1)
   const up = document.createElement('button')
@@ -1232,10 +1240,9 @@ function openProfile () {
     el.textContent = a
     el.setAttribute('aria-label', a + ' avatarını seç')
     el.setAttribute('aria-pressed', selAvatar === a ? 'true' : 'false')
-    el.onclick = () => { selAvatar = a; openProfile(); setTimeout(() => grid.querySelector('[aria-pressed="true"]')?.focus(), 0) }
+    el.onclick = () => { selAvatar = a; renderAvatarGrid(); focusSel() }
     grid.appendChild(el)
   }
-  showModal('modal-profile', 'profile-name')
 }
 
 // Panoya yaz; API reddederse (izin/odak) gizli textarea yöntemine düş.
