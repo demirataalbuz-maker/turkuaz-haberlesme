@@ -482,6 +482,7 @@ const Voice = {
   screen: null,
   muted: false,
   deafened: false,
+  _vch: 'genel', // içinde bulunduğum ses kanalı (aynı oda içinde mesh partition)
   ctx: null,
   master: null,
   hb: null,
@@ -506,8 +507,9 @@ const Voice = {
     if (!this.seen.has(room)) this.seen.set(room, new Map())
     return this.seen.get(room)
   },
-  markSeen (room, code, name) {
-    this.seenMap(room).set(code, { name: name || 'anon', lastSeen: Date.now() })
+  markSeen (room, code, name, vch) {
+    const prev = this.seenMap(room).get(code)
+    this.seenMap(room).set(code, { name: name || 'anon', lastSeen: Date.now(), vch: vch || (prev && prev.vch) || 'genel' })
   },
   pruneSeen () {
     const now = Date.now()
@@ -532,7 +534,7 @@ const Voice = {
   stateEv () {
     return {
       kind: 'voice', on: true, muted: this.muted, video: !!this.cam,
-      screen: this.screen ? this.screen.id : null,
+      screen: this.screen ? this.screen.id : null, vch: this._vch,
       avatar: state.me.avatar, pos: this.myPos
     }
   },
@@ -551,13 +553,16 @@ const Voice = {
     }, 80)
   },
 
-  async join () {
+  async join (vch) {
     if (!activeConv || activeConv.type !== 'room') return
-    if (this.joining || this.room === activeConv.topic) return
+    vch = vch || 'genel'
+    if (this.joining) return
+    if (this.room === activeConv.topic && this._vch === vch) return // zaten bu ses kanalındayım
     this.joining = true
     this.sync()
     if (window.CallMgr && CallMgr.state) CallMgr.end()
-    if (this.room) this.leave()
+    if (this.room) this.leave() // başka oda VEYA aynı odada farklı ses kanalı → önce ayrıl
+    this._pendingVch = vch
     try {
       this.ctx = new AudioContext({ sampleRate: 48000 })
       await this.ctx.resume()
@@ -579,6 +584,7 @@ const Voice = {
     this._myAnalyser.fftSize = 256
     this.inGain.connect(this._myAnalyser)
     this.room = activeConv.topic
+    this._vch = this._pendingVch || 'genel' // hangi ses kanalındayım (mesh partition)
     this._roomJoinTs = Date.now() // ilk kadro sesini bastırmak için (#15)
     this.muted = false
     this.myPos = this.defaultPos(this.code())
@@ -634,6 +640,7 @@ const Voice = {
     this.inGain = null
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null }
     this.room = null
+    this._vch = 'genel'; this._pendingVch = null
     this.joining = false
     this.myPos = null
     this._myBubble = null
@@ -1427,7 +1434,9 @@ const Voice = {
     // Eski oda/oturumdan gecikmiş SDP ve ICE yeni odaya karışmasın.
     if (data.room && data.room !== this.room) return
     if (k === 'hello') {
-      this.markSeen(this.room, from, data.name)
+      const hvch = data.vch || 'genel'
+      this.markSeen(this.room, from, data.name, hvch)
+      if (hvch !== this._vch) { if (this.members.has(from)) this.removeMember(from); this.sync(); return } // farklı ses kanalı
       const m = this.ensureMember(from, data.name)
       m.muted = !!data.muted
       // uzak avatar: emoji VEYA güvenli raster resim data-URL'i (≤20KB); render avatarHTML'de doğrulanır
@@ -1472,17 +1481,20 @@ const Voice = {
     const rr = state.rooms.find(r => r.topic === room)
     if (rr && rr.banned && rr.banned.includes(from)) return
     if (ev.kind === 'voice') {
-      if (ev.on) this.markSeen(room, from, name)
+      const evch = ev.vch || 'genel'
+      if (ev.on) this.markSeen(room, from, name, evch)
       else this.seenMap(room).delete(from)
       if (this.room === room) {
-        if (!ev.on) { this.removeMember(from); return }
+        // Farklı ses kanalındaysa mesh'e ALMA (ayrı ses alanı). Bende varken karşıya
+        // geçtiyse çıkar. Aynı kanaldaysa bağlan. (seen'de yine görünür — liste için.)
+        if (!ev.on || evch !== this._vch) { if (this.members.has(from)) this.removeMember(from); this.sync(); return }
         const m = this.ensureMember(from, name)
         m.muted = !!ev.muted
         m.avatar = ev.avatar ? ((window.isImgAvatar && isImgAvatar(ev.avatar) && ev.avatar.length <= 20000) ? ev.avatar : String(ev.avatar).slice(0, 8)) : m.avatar
         m.screenSid = ev.screen || null
         if (ev.pos) { m.pos = this.clampPos(ev.pos); this.updatePanner(m) }
         this.updateBubble(m)
-        this.sendRtc(from, { kind: 'hello', name: state.me.name, avatar: state.me.avatar, muted: this.muted, screen: this.screen ? this.screen.id : null, pos: this.myPos })
+        this.sendRtc(from, { kind: 'hello', name: state.me.name, avatar: state.me.avatar, muted: this.muted, screen: this.screen ? this.screen.id : null, pos: this.myPos, vch: this._vch })
         this.sync()
       } else this.sync()
       return

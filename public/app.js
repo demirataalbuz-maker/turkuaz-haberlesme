@@ -599,14 +599,18 @@ function renderSidebarView () {
 // Voice, üyelik değişince (katıl/ayrıl/hello) bunu çağırır → ses kanalı listesi canlı
 window.refreshSidebarRoom = () => { if (activeConv && activeConv.type === 'room') renderSidebarView() }
 
-// Odanın sesindeki katılımcılar: sen sesde olmasan da room-ev ile "görülenler" bilinir.
-function voiceParticipants (topic) {
+// Bir ses kanalındaki katılımcılar (vch verilirse ona göre süz). Sen seste olmasan
+// da room-ev "görülenler" ile bilinir; her görülen kişi hangi kanaldaysa oraya düşer.
+function voiceParticipants (topic, vch) {
   const out = new Map()
   const V = window.Voice
   if (!V) return out
   const seen = V.seen && V.seen.get(topic)
-  if (seen) for (const [code, info] of seen) out.set(code, { code, name: nameForCode(code, info.name) })
-  if (V.room === topic) {
+  if (seen) for (const [code, info] of seen) {
+    if (vch && (info.vch || 'genel') !== vch) continue
+    out.set(code, { code, name: nameForCode(code, info.name) })
+  }
+  if (V.room === topic && (!vch || (V._vch || 'genel') === vch)) {
     out.set(state.me.code, { code: state.me.code, name: state.me.name || 'sen', me: true, muted: V.muted })
     for (const m of V.members.values()) out.set(m.code, { code: m.code, name: nameForCode(m.code, m.name), muted: m.muted })
   }
@@ -660,36 +664,45 @@ function renderSidebarRoom (r, el) {
   }
   scroll.appendChild(tg)
 
-  // ---- SES KANALLARI ----
+  // ---- SES KANALLARI (çoklu — her biri ayrı ses alanı) ----
   const vg = document.createElement('div'); vg.className = 'ch-group'
   const vgt = document.createElement('div'); vgt.className = 'ch-group-title'
   const vglabel = document.createElement('span'); vglabel.textContent = 'SES KANALLARI'; vgt.appendChild(vglabel)
-  vg.appendChild(vgt)
-  const parts = voiceParticipants(r.topic)
-  const joined = !!(window.Voice && Voice.room === r.topic)
-  const vrow = document.createElement('div')
-  vrow.className = 'vc-row' + (joined ? ' joined' : '')
-  vrow.setAttribute('role', 'button'); vrow.setAttribute('tabindex', '0')
-  vrow.setAttribute('aria-label', 'Sesli sohbet — genel' + (joined ? ' (içindesin)' : ''))
-  const ic = document.createElement('span'); ic.className = 'vc-ic'; ic.textContent = '🔊'
-  const vl = document.createElement('span'); vl.className = 'ch-label'; vl.textContent = 'genel'
-  vrow.append(ic, vl)
-  if (parts.size) { const c = document.createElement('span'); c.className = 'vc-count'; c.textContent = parts.size; vrow.appendChild(c) }
-  const joinVoice = () => { if (window.Voice && Voice.room !== r.topic) Voice.join() }
-  vrow.onclick = joinVoice
-  vrow.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); joinVoice() } }
-  vg.appendChild(vrow)
-  if (parts.size) {
-    const list = document.createElement('div'); list.className = 'vc-members'
-    for (const p of parts.values()) {
-      const mrow = document.createElement('div'); mrow.className = 'vc-member'
-      mrow.innerHTML = avatarHTML(avatarOf(p.code), p.name, p.code)
-      const mn = document.createElement('span'); mn.className = 'vc-mname'; mn.textContent = p.name + (p.me ? ' (sen)' : '')
-      mrow.appendChild(mn)
-      if (p.muted) { const mu = document.createElement('span'); mu.className = 'vc-mute'; mu.title = 'susturulmuş'; mu.textContent = '🔇'; mrow.appendChild(mu) }
-      list.appendChild(mrow)
+  const vAdd = document.createElement('button'); vAdd.className = 'ch-add-mini'; vAdd.textContent = '+'
+  vAdd.title = 'Yeni ses kanalı'; vAdd.setAttribute('aria-label', 'Yeni ses kanalı ekle')
+  vAdd.onclick = async () => {
+    const ch = await askText('Yeni ses kanalı', '', { placeholder: 'kanal-adı', okLabel: 'Oluştur', maxlen: 24 })
+    if (ch) send({ t: 'add-voice-channel', room: r.topic, ch })
+  }
+  vgt.appendChild(vAdd); vg.appendChild(vgt)
+  const vchans = (r.voiceChannels && r.voiceChannels.length) ? r.voiceChannels : ['genel']
+  for (const vch of vchans) {
+    const parts = voiceParticipants(r.topic, vch)
+    const here = !!(window.Voice && Voice.room === r.topic && (Voice._vch || 'genel') === vch)
+    const vrow = document.createElement('div')
+    vrow.className = 'vc-row' + (here ? ' joined' : '')
+    vrow.setAttribute('role', 'button'); vrow.setAttribute('tabindex', '0')
+    vrow.setAttribute('aria-label', 'Sesli sohbet — ' + vch + (here ? ' (içindesin)' : ''))
+    const ic = document.createElement('span'); ic.className = 'vc-ic'; ic.textContent = '🔊'
+    const vl = document.createElement('span'); vl.className = 'ch-label'; vl.textContent = vch
+    vrow.append(ic, vl)
+    if (parts.size) { const c = document.createElement('span'); c.className = 'vc-count'; c.textContent = parts.size; vrow.appendChild(c) }
+    const joinVoice = () => { if (window.Voice && !here) Voice.join(vch) }
+    vrow.onclick = joinVoice
+    vrow.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); joinVoice() } }
+    vg.appendChild(vrow)
+    if (parts.size) {
+      const list = document.createElement('div'); list.className = 'vc-members'
+      for (const p of parts.values()) {
+        const mrow = document.createElement('div'); mrow.className = 'vc-member'
+        mrow.innerHTML = avatarHTML(avatarOf(p.code), p.name, p.code)
+        const mn = document.createElement('span'); mn.className = 'vc-mname'; mn.textContent = p.name + (p.me ? ' (sen)' : '')
+        mrow.appendChild(mn)
+        if (p.muted) { const mu = document.createElement('span'); mu.className = 'vc-mute'; mu.title = 'susturulmuş'; mu.textContent = '🔇'; mrow.appendChild(mu) }
+        list.appendChild(mrow)
+      }
+      vg.appendChild(list)
     }
-    vg.appendChild(list)
   }
   scroll.appendChild(vg)
 }
