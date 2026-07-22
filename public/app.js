@@ -383,9 +383,15 @@ function render () {
   $('me-status').textContent = state.me.status || 'çevrimiçi'
   $('my-code').textContent = state.me.code
   const av = $('me-avatar')
-  av.textContent = state.me.avatar || initialOf(state.me.name, state.me.code)
-  av.className = state.me.avatar ? 'avatar emoji' : 'avatar'
-  av.style.background = state.me.avatar ? '' : colorOf(state.me.code)
+  if (isImgAvatar(state.me.avatar)) { // resim avatarı: <img> bas (ham data-URL metin olmasın)
+    av.className = 'avatar img'; av.style.background = ''
+    av.innerHTML = `<img src="${esc(state.me.avatar)}" alt="">`
+  } else {
+    av.innerHTML = ''
+    av.textContent = state.me.avatar || initialOf(state.me.name, state.me.code)
+    av.className = state.me.avatar ? 'avatar emoji' : 'avatar'
+    av.style.background = state.me.avatar ? '' : colorOf(state.me.code)
+  }
   if (!state.me.name && $('modal-profile').classList.contains('hidden')) openProfile()
   const homeButton = $('btn-home')
   const onHome = !activeConv

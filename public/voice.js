@@ -1478,7 +1478,7 @@ const Voice = {
         if (!ev.on) { this.removeMember(from); return }
         const m = this.ensureMember(from, name)
         m.muted = !!ev.muted
-        m.avatar = ev.avatar ? String(ev.avatar).slice(0, 8) : m.avatar
+        m.avatar = ev.avatar ? ((window.isImgAvatar && isImgAvatar(ev.avatar) && ev.avatar.length <= 20000) ? ev.avatar : String(ev.avatar).slice(0, 8)) : m.avatar
         m.screenSid = ev.screen || null
         if (ev.pos) { m.pos = this.clampPos(ev.pos); this.updatePanner(m) }
         this.updateBubble(m)
