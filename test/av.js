@@ -415,10 +415,13 @@ async function main () {
     await p.waitEval('oda state geldi', `state.rooms.length === 1`)
     await p.eval(`(async () => { openRoom(state.rooms[0]); return true })()`)
   }
-  // AI gürültü engelleme (RNNoise) yolunu test et: strong moda al
+  // AI gürültü engelleme (RNNoise) yolunu test et: GELİŞMİŞ mod + strong.
+  // v0.18.0'dan beri varsayılan 'classic' ve o yolda hiçbir özel işlem yok —
+  // RNNoise/DFN yalnız gelişmiş modda zincire girer. Mod ayarlanmazsa
+  // TurkuazSettings.set('noise','strong') sessizce etkisiz kalır.
   for (const p of [pA, pB]) {
     await p.waitEval('RNNoise motoru yüklendi', `window.RNNoise && window.RNNoise.ready`, 15000)
-    await p.eval(`TurkuazSettings.set('noise','strong'); true`)
+    await p.eval(`TurkuazSettings.set('audioMode','advanced'); TurkuazSettings.set('noise','strong'); true`)
   }
   await pA.eval(`Voice.join().then(() => true)`)
   await sleep(800)
@@ -482,6 +485,35 @@ async function main () {
   const dnOk = await pA.eval(`!!Voice._denoise`)
   if (!dnOk) fail('RNNoise düğümü mikrofon zincirine takılmadı')
   console.log('PASS: RNNoise (AI gürültü engelleme) zincire takılı + ses karşıya akıyor (' + audioBytes + ' bayt)')
+
+  console.log('--- 2b1) KLASİK mod (v0.18.0 varsayılanı): özel işlem yok, ses yine akıyor')
+  // Bu yol artık tüm kullanıcıların varsayılanı: ham mikrofon → giriş kazancı →
+  // gönder. Ayrı bir kod yolu (buildMicClassic) olduğu için ayrıca doğrulanır;
+  // burada kırılırsa herkesin mikrofonu gider.
+  for (const p of [pA, pB]) {
+    await p.eval(`Voice.leave(); true`)
+    await p.eval(`TurkuazSettings.set('audioMode','classic'); true`)
+  }
+  await sleep(600)
+  await pA.eval(`Voice.join().then(() => true)`)
+  await sleep(800)
+  await pB.eval(`Voice.join().then(() => true)`)
+  let cOkA = false; let cOkB = false
+  for (let i = 0; i < 40 && !(cOkA && cOkB); i++) { cOkA = await pA.eval(connExpr); cOkB = await pB.eval(connExpr); await sleep(1000) }
+  if (!(cOkA && cOkB)) fail('klasik modda sesli sohbet bağlanamadı')
+  await sleep(2500)
+  const classicAudio = await pB.eval(`(async () => {
+    const m = [...Voice.members.values()][0]; if (!m) return -1
+    const st = await m.pc.getStats(); let b = 0
+    st.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') b = r.bytesReceived })
+    return b
+  })()`)
+  if (!(classicAudio > 0)) fail('klasik modda ses akmıyor (inbound audio bytes=' + classicAudio + ')')
+  const classicChain = await pA.eval(`JSON.stringify({ denoise: !!Voice._denoise, gate: !!Voice._ngInt, inGain: !!Voice.inGain })`)
+  const cc = JSON.parse(classicChain)
+  if (cc.denoise || cc.gate) fail('klasik modda özel işlem düğümü kurulmuş: ' + classicChain)
+  if (!cc.inGain) fail('klasik modda giriş kazancı kurulmadı: ' + classicChain)
+  console.log('PASS: klasik mod — zincirde işlem yok, ses karşıya akıyor (' + classicAudio + ' bayt)')
 
   console.log('--- 2b2) Soundboard: olay odada karşıya ulaşıyor')
   if (!(await pA.eval("!!window.Soundboard && Soundboard.sounds.length >= 6"))) fail('Soundboard yüklenmedi')
