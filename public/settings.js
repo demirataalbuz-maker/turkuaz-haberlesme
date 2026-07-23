@@ -8,7 +8,16 @@
     noise: 'standard', screenRes: '720', screenFps: 15, screenAudio: false,
     vidCodec: 'auto', voiceMode: 'flat', micHQ: false, micLimiter: true, lowLatency: false, noiseGate: false, smartGate: false, theme: 'dark', density: 'cozy', notif: true,
     joinLeaveSound: true, bubbleBumpSound: false,
-    speakMode: 'open', vadSens: 50, pttKey: 'Space'
+    speakMode: 'open', vadSens: 50, pttKey: 'Space',
+    // Ses işleme modu. 'classic' = hiçbir özel işlem yok, yalnız tarayıcının
+    // kendi EC+NS+AGC'si (uygulamanın ilk günkü, iyi çalışan hâli).
+    // 'advanced' = filtre/kompresör/limiter/kapı zinciri açılır.
+    // Zincirdeki her katman tek başına makuldü ama üst üste binince sesi eziyordu.
+    audioMode: 'classic',
+    // Gürültü kapısının kendi hassasiyeti (vadSens "sesle konuş" içindir, kapı için DEĞİL)
+    gateSens: 50,
+    // Kendini dinleme (podcast modu) — yalnız kulaklıkta güvenli
+    monitor: false, monitorVol: 60
   }
   let settings = load()
 
@@ -19,6 +28,14 @@
     // varsayılan kapatıldı. Eski kullanıcılarda bir kez kapat — yankı bug düzeltmesi.
     // Kullanıcı sonradan bilerek açarsa uyarıyı görür ve bu göç bir daha çalışmaz.
     if (!s._screenAudioMigrated) { s.screenAudio = false; s._screenAudioMigrated = true; try { localStorage.setItem(KEY, JSON.stringify(s)) } catch {} }
+    // Göç: ses işleme katmanları zamanla üst üste bindi (filtre + kompresör +
+    // makeup + limiter + kapı + AI gürültü engelleme) ve sesi eziyordu. Herkesi
+    // bir kez bilinen-iyi "klasik"e al; gelişmiş zinciri isteyen geri açar.
+    if (!s._audioModeMigrated) {
+      s.audioMode = 'classic'
+      s._audioModeMigrated = true
+      try { localStorage.setItem(KEY, JSON.stringify(s)) } catch {}
+    }
     return s
   }
   function persist () { try { localStorage.setItem(KEY, JSON.stringify(settings)) } catch {} }
@@ -228,6 +245,18 @@
 
     // Ses kalitesi — stüdyo modu (AEC + AGC kapalı, ham temiz ses)
     const gHQ = group('SES KALİTESİ')
+    // Ana anahtar: klasik (hiç işlem yok) / gelişmiş (zincir açık).
+    const classic = (settings.audioMode || 'classic') !== 'advanced'
+    gHQ.appendChild(row('Ses işleme',
+      selectEl([
+        { value: 'classic', label: 'Klasik — hiç işlem yok (önerilen)' },
+        { value: 'advanced', label: 'Gelişmiş — filtre + kompresör + kapı' }
+      ], classic ? 'classic' : 'advanced', v => {
+        TurkuazSettings.set('audioMode', v)
+        renderPanel()
+      }),
+      'Klasik: gürültü engellemeyi tümüyle tarayıcı yapar, sesin üstünde başka hiçbir işlem yoktur — en doğal sonuç. Gelişmiş: aşağıdaki filtre/kompresör/limiter/kapı zinciri devreye girer; üst üste bindiğinde sesi ezebilir. Bir sonraki katılım/aramada geçerli.'))
+    if (!classic) {
     const hqSwitch = document.createElement('label'); hqSwitch.className = 'set-switch'
     const hqCb = document.createElement('input'); hqCb.type = 'checkbox'; hqCb.checked = !!settings.micHQ
     hqCb.onchange = () => TurkuazSettings.set('micHQ', hqCb.checked)
@@ -241,7 +270,25 @@
         { value: 'strong', label: 'Ses sabitleme — bağıran/fısıldayan aynı seviye' }
       ], (settings.micLimiter === false ? 'off' : (settings.micLimiter === 'strong' ? 'strong' : 'normal')),
       v => TurkuazSettings.set('micLimiter', v)),
-      'Bağıran ve fısıldayan aynı seviyede duyulur (pompalamayan kompresör + limiter). "Ses sabitleme" en agresif — oyun için ideal, herkes tutarlı gelir. Bir sonraki katılım/aramada geçerli.'))
+      'Bağıran ve fısıldayan aynı seviyede duyulur (pompalamayan kompresör + limiter). "Ses sabitleme" en agresif — sesi en çok ezen de o: ses kalitesiz geliyorsa önce bunu "Normal"e al. Bir sonraki katılım/aramada geçerli.'))
+    } // /gelişmiş
+    // Kendini dinleme her iki modda da var — bu bir işlem değil, dinleme tapı:
+    // karşı tarafın DUYDUĞU sesi kendi kulaklığına verir.
+    const monSwitch = document.createElement('label'); monSwitch.className = 'set-switch'
+    const monCb = document.createElement('input'); monCb.type = 'checkbox'; monCb.checked = !!settings.monitor
+    monCb.onchange = () => {
+      TurkuazSettings.set('monitor', monCb.checked)
+      if (window.Voice && Voice.refreshMonitor) Voice.refreshMonitor()
+    }
+    monSwitch.append(monCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gHQ.appendChild(row('Kendini dinle 🎙️ (podcast modu)', monSwitch,
+      '⚠️ YALNIZ KULAKLIKLA — hoparlörde mikrofona geri kaçar, uğultu yapar. Karşı tarafın duyduğu İŞLENMİŞ sesi duyarsın: kapı kesiyor mu, kompresör eziyor mu, anında anlarsın. Anında geçerli.'))
+    gHQ.appendChild(row('Kendini dinleme seviyesi',
+      slider(settings.monitorVol == null ? 60 : settings.monitorVol, v => {
+        TurkuazSettings.set('monitorVol', v)
+        if (window.Voice && Voice.refreshMonitor) Voice.refreshMonitor()
+      }),
+      'Kendi sesini ne kadar duyacaksın. Anında geçerli.'))
     p.appendChild(gHQ)
 
     // Oyun / düşük gecikme
@@ -252,6 +299,8 @@
     llSwitch.append(llCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gGame.appendChild(row('Düşük gecikme modu 🎮', llSwitch,
       'Jitter buffer\'ı kısar → minimum gecikme (rekabetçi oyun). Ödün: dalgalı ağda biraz daha çıtırtı olabilir. Anında geçerli.'))
+    // Kapı yalnız GELİŞMİŞ modda anlamlı: klasik zincirde kapı düğümü hiç kurulmuyor.
+    if (!classic) {
     const ngSwitch = document.createElement('label'); ngSwitch.className = 'set-switch'
     const ngCb = document.createElement('input'); ngCb.type = 'checkbox'; ngCb.checked = !!settings.noiseGate
     ngCb.onchange = () => TurkuazSettings.set('noiseGate', ngCb.checked)
@@ -265,6 +314,15 @@
     sgSwitch.append(sgCb, Object.assign(document.createElement('span'), { className: 'set-track' }))
     gGame.appendChild(row('Akıllı gate — VAD 🧠 (deneysel)', sgSwitch,
       'Noise gate açıkken çalışır. "Yüksek mi?" yerine "gerçekten insan sesi mi?" der (Silero yapay sinir ağı) → yüksek klavye takırtısını bile keser, kısık konuşmayı yakalar. Yüklenemezse otomatik olarak normal gate\'e döner. Bir sonraki katılım/aramada geçerli.'))
+    // Kapı hassasiyeti — ARTIK gerçekten kapıyı etkiler (eskiden eşik koda gömülüydü
+    // ve alçak sesli konuşan kesiliyordu, ayarlayacak yer yoktu).
+    gGame.appendChild(row('Gürültü kapısı hassasiyeti 🎚️',
+      slider(settings.gateSens == null ? 50 : settings.gateSens, v => {
+        TurkuazSettings.set('gateSens', v)
+        if (window.Voice && Voice.refreshGate) Voice.refreshGate()
+      }),
+      'Kesiyorsa YÜKSELT. Yüksek = fısıltıyı bile geçirir ve duraklamalarda açık kalır; düşük = daha sıkı keser. Anında geçerli.'))
+    } // /gelişmiş — kapı ayarları
     p.appendChild(gGame)
 
     // Sesli sohbet modu (konumsal oturma odası / düz konuşma)

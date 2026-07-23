@@ -24,6 +24,15 @@ function micConstraints (forceStandard = false) {
   // AEC kapalı olduğu için YALNIZ kulaklıkta güvenli (hoparlörde yankı yapar).
   const hq = !!s.micHQ
   const limiter = s.micLimiter !== false && s.micLimiter !== 'off' // dengeleme açıksa tarayıcı AGC'yi biz devralırız
+  // KLASİK MOD: kendi zincirimiz yok, o yüzden gürültü engelleme ve seviye işini
+  // tümüyle tarayıcıya bırakırız. Burada s.noise/micLimiter'a BAKILMAZ — yoksa
+  // eski bir 'dfn'/'strong' seçimi, RNNoise da çalışmadığı için mikrofonu
+  // gürültü engellemesiz bırakırdı.
+  if (isClassicAudio()) {
+    const a = { echoCancellation: !hq, noiseSuppression: true, autoGainControl: !hq }
+    if (s.micId) a.deviceId = { exact: s.micId }
+    return { audio: a }
+  }
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
   const audio = {
     echoCancellation: !hq,
@@ -187,6 +196,11 @@ async function makeDfnNode (ctx) {
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
+  // KLASİK MOD: hiçbir özel işlem yok. Ham mikrofon → giriş kazancı → gönder.
+  // Gürültü engelleme işini tarayıcının kendi EC+NS+AGC'si yapar (micConstraints).
+  // Uygulamanın ilk günkü hâli buydu ve sesi en doğal veren bu; sonradan eklenen
+  // katmanlar (filtre/kompresör/limiter/kapı/AI) üst üste binince sesi eziyordu.
+  if (isClassicAudio()) return buildMicClassic(obj)
   const noiseMode = _settings().noise || 'standard'
   const Ctx = window.AudioContext || window.webkitAudioContext
   if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise/DFN 48 kHz ister
@@ -273,9 +287,15 @@ async function buildMic (obj) {
   if (_settings().noiseGate) {
     const gate = obj.ctx.createGain(); gate.gain.value = 0
     const gan = obj.ctx.createAnalyser(); gan.fftSize = 256
+    // ÖN-BAKIŞ (lookahead): karar GİRİŞTEN anlık alınır ama kapıdan geçen sinyal
+    // GECİKTİRİLİR. Böylece kapı, kelimenin ilk hecesi kapıya VARMADAN açılmış
+    // olur. Bu olmadan yoklama (25ms) + rampa (~12ms) kadarlık bir pay kelime
+    // başlarını yiyordu — "p/t/k/s" ünsüzleri kesiliyor diye duyulan şey buydu.
+    const look = obj.ctx.createDelay(0.2)
+    look.delayTime.value = GATE_LOOKAHEAD
     // Kapı kararı GİRİŞ enerjisinden alınır (limiter makeup'tan bağımsız → "ses
     // sabitleme" açıkken bile eşik tutarlı). Kapılanan sinyal işlenmiş chainOut.
-    obj.inGain.connect(gan); chainOut.connect(gate); gate.connect(dest)
+    obj.inGain.connect(gan); chainOut.connect(look); look.connect(gate); gate.connect(dest)
     // Akıllı gate (opt-in, DENEYSEL): VAD hazırsa "insan sesi mi" kararı — yüksek ama
     // konuşma-olmayan sesi (klavye/fan) kesmede amplitüdden iyi. Hazır değilse/kapalıysa
     // amplitüde güvenli düşer (mevcut davranış).
@@ -284,22 +304,111 @@ async function buildMic (obj) {
     let openUntil = 0
     obj._ngInt = setInterval(() => {
       const now = performance.now()
+      const sens = gateSens()
       let voice
       if (_settings().smartGate && obj._vadReady && (now - (obj._vadTs || 0) < 500)) {
-        voice = (obj._vadProb || 0) > 0.5 // Silero konuşma olasılığı
+        voice = (obj._vadProb || 0) > vadProbThreshold(sens)
       } else {
         gan.getByteTimeDomainData(buf)
-        let dev = 0; for (const v of buf) dev = Math.max(dev, Math.abs(v - 128))
-        voice = dev > 7 // amplitüd yedeği
+        // TEPE yerine RMS: tek bir çıtırtı kapıyı açmasın, alçak sesli konuşma
+        // da tepe düşük olsa bile enerjisiyle yakalansın (daha kararlı karar).
+        let sum = 0
+        for (const v of buf) { const d = (v - 128) / 128; sum += d * d }
+        const rms = Math.sqrt(sum / buf.length)
+        voice = rms > rmsThreshold(sens)
       }
-      if (voice) openUntil = now + 220 // konuşma algılandı → 220ms daha açık tut
+      if (voice) openUntil = now + gateHold(sens)
       const open = now < openUntil
-      try { gate.gain.setTargetAtTime(open ? 1 : 0, obj.ctx.currentTime, open ? 0.004 : 0.06) } catch {}
+      // Kapanış rampası uzun: cümle sonu aniden kesilip "yutulmuş" gibi olmasın.
+      try { gate.gain.setTargetAtTime(open ? 1 : 0, obj.ctx.currentTime, open ? 0.004 : 0.12) } catch {}
     }, 25)
+    obj._gateOutNode = gate
   } else {
     chainOut.connect(dest)
+    obj._gateOutNode = chainOut
   }
+  // Kendini dinleme (podcast modu): İŞLENMİŞ sesi kendi kulaklığına ver — yani
+  // karşı tarafın DUYDUĞUNUN aynısını duyarsın. Yalnız kulaklıkta güvenli;
+  // hoparlörde mikrofona geri kaçar (uğultu/feedback).
+  obj._monitorGain = obj.ctx.createGain()
+  obj._monitorGain.gain.value = monitorGain()
+  obj._gateOutNode.connect(obj._monitorGain)
+  obj._monitorGain.connect(obj.ctx.destination)
   return dest.stream
+}
+
+// Ses işleme modu. Varsayılan 'classic' — özel zincir yok.
+function isClassicAudio () { return (_settings().audioMode || 'classic') !== 'advanced' }
+
+// Klasik zincir: ham mikrofon → giriş kazancı → çıkış. Araya HİÇBİR ŞEY girmez.
+// (Kendini dinleme yine çalışır; o bir işlem değil, dinleme tapı.)
+async function buildMicClassic (obj) {
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 })
+  try { obj.ctx.resume() } catch {}
+  let raw
+  const take = () => navigator.mediaDevices.getUserMedia(micConstraints(false))
+  try {
+    raw = await take()
+  } catch (err) {
+    // Kayıtlı cihaz kaybolduysa varsayılana düş (gelişmiş moddaki davranışın aynısı)
+    if (!_settings().micId) throw err
+    const c = micConstraints(false)
+    delete c.audio.deviceId
+    raw = await navigator.mediaDevices.getUserMedia(c)
+    if (window.toast) toast('Seçili mikrofon bulunamadı; varsayılan mikrofon kullanılıyor.', 'warn', 5000)
+  }
+  obj.micRaw = raw
+  obj._denoise = null
+  const src = obj.ctx.createMediaStreamSource(raw)
+  obj.inGain = obj.ctx.createGain()
+  obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
+  const dest = obj.ctx.createMediaStreamDestination()
+  src.connect(obj.inGain)
+  obj.inGain.connect(dest)
+  obj._gateOutNode = obj.inGain
+  obj._monitorGain = obj.ctx.createGain()
+  obj._monitorGain.gain.value = monitorGain()
+  obj.inGain.connect(obj._monitorGain)
+  obj._monitorGain.connect(obj.ctx.destination)
+  return dest.stream
+}
+
+// ---- gürültü kapısı ayarları ----
+// Kapının hassasiyeti ARTIK AYARLANABİLİR. Önceden eşikler koda gömülüydü
+// (rms yerine tepe > 7/128 ≈ -25 dBFS ve VAD > 0.5); ayarlardaki hassasiyet
+// kaydırıcısı ise yalnız "sesle konuş" modunu etkiliyordu, kapıyı DEĞİL.
+// Alçak sesli konuşan biri kapıya takılıyor ve düzeltemiyordu.
+const GATE_LOOKAHEAD = 0.02 // 20ms ön-bakış (kelime başları kesilmesin)
+function gateSens () {
+  const v = Number(_settings().gateSens)
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 50
+}
+// Hassasiyet yüksek → eşik DÜŞÜK (fısıltıyı bile geçirir, gürültü de geçebilir).
+// Ölçek RMS; eski kod TEPE değerine bakıyordu (7/128 ≈ 0.055 tepe ≈ 0.018 RMS,
+// konuşma için ~3 tepe/RMS oranıyla). Bu yüzden eğri şöyle kuruldu:
+//   sens=0   → ~0.015  (eski davranışın sıkı ucu)
+//   sens=50  → ~0.008  (varsayılan: eskisinin ~2 katı müsamahalı)
+//   sens=100 → ~0.001  (fısıltı bile geçer)
+function rmsThreshold (sens) { return 0.001 + (100 - sens) * 0.00014 }
+function vadProbThreshold (sens) { return Math.max(0.15, Math.min(0.85, 0.9 - sens * 0.006)) }
+// Hassasiyet yüksek → daha uzun açık tut (cümle içi duraklamada kapanmasın)
+function gateHold (sens) { return 180 + sens * 3 }
+function monitorGain () {
+  const s = _settings()
+  if (!s.monitor) return 0
+  const v = Number(s.monitorVol)
+  return (Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 60) / 100
+}
+// Monitör tap'i MediaStreamDestination'dan ÖNCE olduğu için, gönderilen track'i
+// kapatmak (susturma/PTT) kendi kulaklığındaki sesi susturmaz. Karşı taraf seni
+// duymuyorken sen kendini duyuyor olursan yanıltıcı olur → mikrofon fiilen
+// kapalıyken monitörü de sustur.
+function applyMonitor (obj) {
+  if (!obj || !obj._monitorGain || !obj.ctx) return
+  const off = obj.muted || obj.mutedFlag || obj._gateOpen === false
+  const g = off ? 0 : monitorGain()
+  try { obj._monitorGain.gain.setTargetAtTime(g, obj.ctx.currentTime, 0.03) } catch { obj._monitorGain.gain.value = g }
 }
 
 const LR_SCALE = 8
@@ -705,6 +814,7 @@ const Voice = {
   _micGate (open) {
     this._gateOpen = open
     if (this.mic) this.mic.getAudioTracks().forEach(t => { t.enabled = open && !this.muted })
+    applyMonitor(this) // susturulmuş/kapalıyken kendini duyma
   },
   _startGate () {
     this._stopGate()
@@ -1073,6 +1183,11 @@ const Voice = {
       }
     }
   },
+  // Kendini dinleme seviyesini canlı uygula (ayar değişince yeniden katılmaya gerek yok)
+  refreshMonitor () { applyMonitor(this); applyMonitor(window.CallMgr) },
+  // Kapı hassasiyeti zaten her döngüde ayardan okunuyor; bu yalnız geri bildirim
+  // için (ve ileride ek durum gerekirse tek yer olsun diye).
+  refreshGate () { return gateSens() },
   // O an ekran paylaşıyor muyum? (karşı taraf beni kontrol edebilsin diye şart)
   amSharing () { return !!this.screen },
   // Uzaktan kontrol imlecinin DOĞRU monitöre eşlenmesi için: hangi ekranı
@@ -2215,6 +2330,7 @@ const CallMgr = {
     if (!this.mic) return
     this.mutedFlag = !this.mutedFlag
     this.mic.getAudioTracks().forEach(t => { t.enabled = !this.mutedFlag })
+    applyMonitor(this) // susturunca kendini de duyma
     this.renderVideos()
   },
   setOutputVolume (pct) { if (this.audioEl) this.audioEl.volume = Math.min(1, Math.max(0, (Number(pct) || 0) / 100)) },
