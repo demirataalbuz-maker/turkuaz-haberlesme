@@ -3,8 +3,9 @@
 //   PAYLAŞAN — kendi ekranını kontrol ettirir (onay verir, girdiyi OS'e uygular)
 //
 // Taşıma: Voice mesh'indeki 'turkuaz-ctrl' RTCDataChannel (JSON mesajlar).
-// OS enjeksiyonu yalnız masaüstünde (Electron + nut-js kurulu). Tarayıcıda
-// veya native yoksa özellik görünmez/çalışmaz.
+// OS enjeksiyonu yalnız PAYLAŞAN tarafta ve yalnız masaüstünde olur
+// (Electron + nut-js kurulu); native yoksa istek 'deny/unavailable' alır.
+// İZLEYEN tarafta native gerekmez — girdiyi yakalayıp veri kanalından yollar.
 //
 // GÜVENLİK modeli:
 //  - Kontrol yalnız açık onayla başlar; paylaşan her an durdurabilir.
@@ -37,8 +38,10 @@
 
   // ---------- İZLEYEN tarafı ----------
   RC.canRequest = async function (code) {
-    // Yalnız masaüstünde ve o peer gerçekten ekran paylaşıyorsa
-    return !!(await nativeAvailable()) && !!code
+    // İzleyen tarafta native GEREKMEZ: girdi yalnızca veri kanalından yollanır,
+    // OS'e uygulama paylaşan tarafta olur. Paylaşanda native yoksa isteğe zaten
+    // 'deny/unavailable' döner — burada peşinen gizlemeye gerek yok.
+    return !!code
   }
 
   RC.requestControl = function (code, videoEl) {
@@ -89,7 +92,13 @@
 
   RC._attachCapture = function (v) {
     const code = this.controllingCode
-    const inp = (ev) => { if (this.controllingCode === code && desktop()) desktop().input(ev) }
+    // Yakalanan girdi KARŞIYA gider, yerel OS'e DEĞİL: veri kanalından
+    // {c:<tür>, ...} olarak yollanır, paylaşan tarafta armed ise uygulanır.
+    // (Buradan desktop().input() çağırmak kendi makinemizi sürmek olurdu.)
+    const inp = (ev) => {
+      if (this.controllingCode !== code) return
+      send(code, { c: ev.k, x: ev.x, y: ev.y, b: ev.b, dy: ev.dy, code: ev.code })
+    }
     const h = {}
     h.move = (e) => {
       const now = performance.now()

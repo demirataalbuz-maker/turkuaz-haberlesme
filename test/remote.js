@@ -59,5 +59,165 @@ check('letterbox: siyah bant (üst/alt) null döner', () => {
   assert.ok(normXY(800, 600, 1920, 1080, 400, 300) !== null)       // içerik
 })
 
-console.log(fails ? ('SONUÇ: ' + fails + ' FAIL') : 'PASS: uzaktan kontrol — saf mantık + nazik kapanma')
-process.exit(fails ? 1 : 0)
+// 4) UÇTAN UCA taşıma sözleşmesi: remotectrl.js gerçek dosyası sahte bir DOM
+// içinde çalıştırılır. v0.16.0'da izleyen tarafı yakaladığı girdiyi karşıya
+// yollamak yerine KENDİ OS'ine enjekte etmeye çalışıyordu (kontrol hiç
+// çalışmıyordu); bu blok o regresyonu kalıcı olarak kapatır.
+const vm = require('vm')
+const fs = require('fs')
+const path = require('path')
+const RC_SRC = fs.readFileSync(path.join(__dirname, '..', 'public', 'remotectrl.js'), 'utf8')
+
+function fakeEl () {
+  return {
+    className: '', innerHTML: '', style: {},
+    setAttribute () {}, remove () {}, appendChild () {},
+    querySelector: () => ({ onclick: null })
+  }
+}
+
+function fakeVideo () {
+  const h = {}
+  return {
+    videoWidth: 1920, videoHeight: 1080, style: {}, tabIndex: 0,
+    focus () {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    addEventListener: (t, fn) => { h[t] = fn },
+    removeEventListener: (t) => { delete h[t] },
+    fire: (t, ev) => { if (h[t]) h[t](ev) }
+  }
+}
+
+// Bir "uç" kurar: kendi RemoteControl örneği + gönderilenler/enjekte edilenler kaydı
+function makeEndpoint ({ native = true, sharing = true } = {}) {
+  const sent = []      // veri kanalından karşıya giden mesajlar
+  const injected = []  // bu makinenin OS'ine uygulanan girdiler
+  const Voice = {
+    ctrlSend: (code, obj) => { sent.push({ code, obj }); return true },
+    amSharing: () => sharing,
+    memberName: () => 'Test Kişi'
+  }
+  const win = {
+    Voice,
+    addEventListener () {}, removeEventListener () {},
+    toast () {}
+  }
+  if (native) {
+    win.turkuazDesktop = {
+      remote: {
+        available: async () => true,
+        begin: async () => ({ ok: true }),
+        end: async () => true,
+        input: (ev) => { injected.push(ev); return true }
+      }
+    }
+  }
+  // Not: remotectrl.js bu yardımcıları `window.x` ile kontrol edip çıplak `x()`
+  // olarak çağırıyor (app.js'te ikisi de global) — sahte ortamda da öyle olmalı.
+  const ctx = vm.createContext({
+    window: win,
+    Voice,
+    toast: win.toast,
+    document: { createElement: fakeEl, body: { appendChild () {} } },
+    performance: { now: () => Date.now() },
+    esc: (s) => s,
+    console
+  })
+  vm.runInContext(RC_SRC, ctx)
+  return { RC: win.RemoteControl, sent, injected }
+}
+
+function checkAsync (name, fn) {
+  return fn().then(
+    () => console.log('PASS: ' + name),
+    (e) => { console.log('FAIL: ' + name + ' — ' + e.message); fails++ }
+  )
+}
+
+async function transportTests () {
+  // -- İZLEYEN: yakalanan girdi karşıya YOLLANIR, yerelde enjekte EDİLMEZ
+  await checkAsync('izleyen girdisi veri kanalına gider, yerel OS\'e gitmez', async () => {
+    const A = makeEndpoint()               // izleyen (native kurulu olsa bile)
+    const v = fakeVideo()
+    A.RC._controlVideo = v
+    A.RC._pendingReqTo = 'PEER'
+    A.RC.onMessage('PEER', JSON.stringify({ c: 'grant' }))   // onay geldi → kontrol başlar
+    assert.strictEqual(A.RC.controllingCode, 'PEER')
+
+    // panel 800x600, video 1920x1080 → merkez (400,300) = 0.5,0.5
+    v.fire('pointerdown', { clientX: 400, clientY: 300, button: 0, preventDefault () {} })
+
+    const kinds = A.sent.map((s) => s.obj.c)
+    assert.ok(kinds.includes('m'), 'fare konumu yollanmalı')
+    assert.ok(kinds.includes('d'), 'tuş basımı yollanmalı')
+    const move = A.sent.find((s) => s.obj.c === 'm')
+    assert.strictEqual(move.code, 'PEER')
+    assert.ok(Math.abs(move.obj.x - 0.5) < 1e-6 && Math.abs(move.obj.y - 0.5) < 1e-6)
+    // REGRESYON KİLİDİ: izleyen kendi makinesini sürmemeli
+    assert.deepStrictEqual(A.injected, [], 'izleyen kendi OS\'ine enjekte etmemeli')
+  })
+
+  // -- Uçtan uca: izleyenin yolladığı paket paylaşanda OS'e uygulanır
+  await checkAsync('izleyen → paylaşan: paket OS girdisine dönüşür', async () => {
+    const A = makeEndpoint({ native: false })   // izleyende native olmasa da olur
+    const B = makeEndpoint()                    // paylaşan (native var)
+    const v = fakeVideo()
+    A.RC._controlVideo = v
+    A.RC._pendingReqTo = 'B'
+    A.RC.onMessage('B', JSON.stringify({ c: 'grant' }))
+
+    await B.RC._grant('A')                      // paylaşan izin verdi → armed
+    assert.strictEqual(B.RC.controllerCode, 'A')
+
+    v.fire('pointerdown', { clientX: 400, clientY: 300, button: 0, preventDefault () {} })
+    for (const s of A.sent) B.RC.onMessage('A', JSON.stringify(s.obj))
+
+    const ks = B.injected.map((i) => i.k)
+    assert.ok(ks.includes('m') && ks.includes('d'), 'paylaşanda girdi uygulanmalı')
+    const m = B.injected.find((i) => i.k === 'm')
+    assert.ok(Math.abs(m.x - 0.5) < 1e-6 && Math.abs(m.y - 0.5) < 1e-6)
+  })
+
+  // -- İzleyende native yokken de kontrol istenebilmeli (buton gizlenmemeli)
+  await checkAsync('canRequest izleyende native şart koşmaz', async () => {
+    const A = makeEndpoint({ native: false })
+    assert.strictEqual(await A.RC.canRequest('PEER'), true)
+    assert.strictEqual(await A.RC.canRequest(null), false)
+  })
+
+  // -- Çift kapı: armed değilken ve yabancı peer'dan gelen girdi reddedilir
+  await checkAsync('armed değilken girdi uygulanmaz', async () => {
+    const B = makeEndpoint()
+    B.RC.onMessage('A', JSON.stringify({ c: 'm', x: 0.5, y: 0.5 }))
+    assert.deepStrictEqual(B.injected, [])
+  })
+  await checkAsync('yetkisiz peer girdisi uygulanmaz', async () => {
+    const B = makeEndpoint()
+    await B.RC._grant('A')
+    B.RC.onMessage('KOTU', JSON.stringify({ c: 'm', x: 0.5, y: 0.5 }))
+    assert.deepStrictEqual(B.injected, [])
+  })
+
+  // -- Paylaşan ekranı bırakınca kontrol biter
+  await checkAsync('yayın kapanınca kontrol sonlanır', async () => {
+    const B = makeEndpoint()
+    await B.RC._grant('A')
+    B.RC.onShareStopped()
+    assert.strictEqual(B.RC.controllerCode, null)
+    assert.strictEqual(B.RC._armed, false)
+  })
+
+  // -- Paylaşan ekran paylaşmıyorsa istek reddedilir
+  await checkAsync('ekran paylaşmayan isteği reddeder', async () => {
+    const B = makeEndpoint({ sharing: false })
+    await B.RC._onRequest('A')
+    const deny = B.sent.find((s) => s.obj.c === 'deny')
+    assert.ok(deny && deny.obj.reason === 'unavailable')
+    assert.strictEqual(B.RC.controllerCode, null)
+  })
+}
+
+transportTests().then(() => {
+  console.log(fails ? ('SONUÇ: ' + fails + ' FAIL') : 'PASS: uzaktan kontrol — saf mantık + taşıma sözleşmesi + nazik kapanma')
+  process.exit(fails ? 1 : 0)
+})
