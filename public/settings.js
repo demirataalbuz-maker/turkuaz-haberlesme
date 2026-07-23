@@ -249,13 +249,13 @@
     const classic = (settings.audioMode || 'classic') !== 'advanced'
     gHQ.appendChild(row('Ses işleme',
       selectEl([
-        { value: 'classic', label: 'Klasik — hiç işlem yok (önerilen)' },
-        { value: 'advanced', label: 'Gelişmiş — filtre + kompresör + kapı' }
+        { value: 'classic', label: 'Klasik — sadece gürültü engelleme (önerilen)' },
+        { value: 'advanced', label: 'Gelişmiş — + kompresör, limiter, kapı' }
       ], classic ? 'classic' : 'advanced', v => {
         TurkuazSettings.set('audioMode', v)
         renderPanel()
       }),
-      'Klasik: gürültü engellemeyi tümüyle tarayıcı yapar, sesin üstünde başka hiçbir işlem yoktur — en doğal sonuç. Gelişmiş: aşağıdaki filtre/kompresör/limiter/kapı zinciri devreye girer; üst üste bindiğinde sesi ezebilir. Bir sonraki katılım/aramada geçerli.'))
+      'Yukarıdaki gürültü engelleme (RNNoise / DeepFilterNet) HER İKİ MODDA da çalışır — bu ayar onu etkilemez. Klasik: gürültü engellemeden sonra sese başka hiçbir şey yapılmaz, seviyeyi tarayıcı dengeler. Gelişmiş: üstüne filtre + kompresör + limiter + noise gate biner; üst üste bindiğinde sesi boğuklaştırabilir. Bir sonraki katılım/aramada geçerli.'))
     if (!classic) {
     const hqSwitch = document.createElement('label'); hqSwitch.className = 'set-switch'
     const hqCb = document.createElement('input'); hqCb.type = 'checkbox'; hqCb.checked = !!settings.micHQ

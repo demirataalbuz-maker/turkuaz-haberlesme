@@ -24,20 +24,14 @@ function micConstraints (forceStandard = false) {
   // AEC kapalı olduğu için YALNIZ kulaklıkta güvenli (hoparlörde yankı yapar).
   const hq = !!s.micHQ
   const limiter = s.micLimiter !== false && s.micLimiter !== 'off' // dengeleme açıksa tarayıcı AGC'yi biz devralırız
-  // KLASİK MOD: kendi zincirimiz yok, o yüzden gürültü engelleme ve seviye işini
-  // tümüyle tarayıcıya bırakırız. Burada s.noise/micLimiter'a BAKILMAZ — yoksa
-  // eski bir 'dfn'/'strong' seçimi, RNNoise da çalışmadığı için mikrofonu
-  // gürültü engellemesiz bırakırdı.
-  if (isClassicAudio()) {
-    const a = { echoCancellation: !hq, noiseSuppression: true, autoGainControl: !hq }
-    if (s.micId) a.deviceId = { exact: s.micId }
-    return { audio: a }
-  }
   // 'strong' (RNNoise) modda tarayıcının kendi gürültü bastırması kapalı — işi RNNoise yapar
   const audio = {
     echoCancellation: !hq,
     noiseSuppression: forceStandard || (s.noise || 'standard') === 'standard',
-    autoGainControl: !hq && !limiter // limiter varsa çift işleme olmasın
+    // Klasik modda kendi kompresör/limiter'ımız YOK, o yüzden seviye işini
+    // tarayıcının AGC'sine bırakırız. Gelişmiş modda dengeleme açıksa AGC
+    // kapanır ki çift işleme olmasın.
+    autoGainControl: !hq && (isClassicAudio() || !limiter)
   }
   if (s.micId) audio.deviceId = { exact: s.micId }
   return { audio }
@@ -196,11 +190,6 @@ async function makeDfnNode (ctx) {
 // Ham mikrofonu WebAudio'dan geçirip giriş kazancı uygular; gönderilecek
 // (işlenmiş) akışı döndürür. micRaw/inGain/ctx referanslarını obj'ye yazar.
 async function buildMic (obj) {
-  // KLASİK MOD: hiçbir özel işlem yok. Ham mikrofon → giriş kazancı → gönder.
-  // Gürültü engelleme işini tarayıcının kendi EC+NS+AGC'si yapar (micConstraints).
-  // Uygulamanın ilk günkü hâli buydu ve sesi en doğal veren bu; sonradan eklenen
-  // katmanlar (filtre/kompresör/limiter/kapı/AI) üst üste binince sesi eziyordu.
-  if (isClassicAudio()) return buildMicClassic(obj)
   const noiseMode = _settings().noise || 'standard'
   const Ctx = window.AudioContext || window.webkitAudioContext
   if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 }) // RNNoise/DFN 48 kHz ister
@@ -252,6 +241,16 @@ async function buildMic (obj) {
     toast('AI gürültü engelleme henüz hazır değil; bu katılımda standart koruma kullanılıyor.', 'warn', 5000)
   }
   head.connect(obj.inGain)
+  // KLASİK MOD: gürültü engelleme (yukarıdaki DFN/RNNoise/tarayıcı NS) AYNEN
+  // kalır — asıl istenen zaten oydu. Atlanan şey SEVİYE ZİNCİRİ: yüksek-geçiren
+  // filtre + kompresör + makeup kazanç + brickwall limiter + kapı. Sesi ezen,
+  // üst üste binince boğuklaştıran katman buydu; gürültü engelleme değil.
+  if (isClassicAudio()) {
+    obj.inGain.connect(dest)
+    obj._gateOutNode = obj.inGain
+    attachMonitor(obj)
+    return dest.stream
+  }
   // Akıllı seviye normalizasyonu: pompalayan tarayıcı AGC yerine hafif kompresör
   // (kısık konuşanı kaldırır) + limiter (tepeleri yakalar). Tutarlı, rahat seviye
   // ve pompalama YOK. micLimiter açıkken tarayıcı AGC kapalıdır (çift işleme olmaz).
@@ -327,52 +326,22 @@ async function buildMic (obj) {
     chainOut.connect(dest)
     obj._gateOutNode = chainOut
   }
-  // Kendini dinleme (podcast modu): İŞLENMİŞ sesi kendi kulaklığına ver — yani
-  // karşı tarafın DUYDUĞUNUN aynısını duyarsın. Yalnız kulaklıkta güvenli;
-  // hoparlörde mikrofona geri kaçar (uğultu/feedback).
+  attachMonitor(obj)
+  return dest.stream
+}
+
+// Kendini dinleme (podcast modu): İŞLENMİŞ sesi kendi kulaklığına ver — yani
+// karşı tarafın DUYDUĞUNUN aynısını duyarsın. Yalnız kulaklıkta güvenli;
+// hoparlörde mikrofona geri kaçar (uğultu/feedback).
+function attachMonitor (obj) {
   obj._monitorGain = obj.ctx.createGain()
   obj._monitorGain.gain.value = monitorGain()
   obj._gateOutNode.connect(obj._monitorGain)
   obj._monitorGain.connect(obj.ctx.destination)
-  return dest.stream
 }
 
 // Ses işleme modu. Varsayılan 'classic' — özel zincir yok.
 function isClassicAudio () { return (_settings().audioMode || 'classic') !== 'advanced' }
-
-// Klasik zincir: ham mikrofon → giriş kazancı → çıkış. Araya HİÇBİR ŞEY girmez.
-// (Kendini dinleme yine çalışır; o bir işlem değil, dinleme tapı.)
-async function buildMicClassic (obj) {
-  const Ctx = window.AudioContext || window.webkitAudioContext
-  if (!obj.ctx) obj.ctx = new Ctx({ sampleRate: 48000 })
-  try { obj.ctx.resume() } catch {}
-  let raw
-  const take = () => navigator.mediaDevices.getUserMedia(micConstraints(false))
-  try {
-    raw = await take()
-  } catch (err) {
-    // Kayıtlı cihaz kaybolduysa varsayılana düş (gelişmiş moddaki davranışın aynısı)
-    if (!_settings().micId) throw err
-    const c = micConstraints(false)
-    delete c.audio.deviceId
-    raw = await navigator.mediaDevices.getUserMedia(c)
-    if (window.toast) toast('Seçili mikrofon bulunamadı; varsayılan mikrofon kullanılıyor.', 'warn', 5000)
-  }
-  obj.micRaw = raw
-  obj._denoise = null
-  const src = obj.ctx.createMediaStreamSource(raw)
-  obj.inGain = obj.ctx.createGain()
-  obj.inGain.gain.value = (Number(_settings().inVol) || 100) / 100
-  const dest = obj.ctx.createMediaStreamDestination()
-  src.connect(obj.inGain)
-  obj.inGain.connect(dest)
-  obj._gateOutNode = obj.inGain
-  obj._monitorGain = obj.ctx.createGain()
-  obj._monitorGain.gain.value = monitorGain()
-  obj.inGain.connect(obj._monitorGain)
-  obj._monitorGain.connect(obj.ctx.destination)
-  return dest.stream
-}
 
 // ---- gürültü kapısı ayarları ----
 // Kapının hassasiyeti ARTIK AYARLANABİLİR. Önceden eşikler koda gömülüydü

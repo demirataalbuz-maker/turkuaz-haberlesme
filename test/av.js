@@ -486,10 +486,12 @@ async function main () {
   if (!dnOk) fail('RNNoise düğümü mikrofon zincirine takılmadı')
   console.log('PASS: RNNoise (AI gürültü engelleme) zincire takılı + ses karşıya akıyor (' + audioBytes + ' bayt)')
 
-  console.log('--- 2b1) KLASİK mod (v0.18.0 varsayılanı): özel işlem yok, ses yine akıyor')
-  // Bu yol artık tüm kullanıcıların varsayılanı: ham mikrofon → giriş kazancı →
-  // gönder. Ayrı bir kod yolu (buildMicClassic) olduğu için ayrıca doğrulanır;
-  // burada kırılırsa herkesin mikrofonu gider.
+  console.log('--- 2b1) KLASİK mod: gürültü engelleme KALIR, seviye zinciri gider')
+  // Tüm kullanıcıların varsayılanı bu yol. Kritik ayrım: klasik mod yalnız
+  // SEVİYE ZİNCİRİNİ (filtre+kompresör+limiter+kapı) atlar; gürültü engelleme
+  // (RNNoise/DFN) aynen çalışmaya devam eder. Bir sürüm boyunca ikisi birden
+  // kapanmıştı ve kullanıcı "gürültü engelleme çalışmıyor" diye bildirdi.
+  // noise='strong' önceki adımdan duruyor → denoise düğümü BEKLENİR.
   for (const p of [pA, pB]) {
     await p.eval(`Voice.leave(); true`)
     await p.eval(`TurkuazSettings.set('audioMode','classic'); true`)
@@ -511,9 +513,10 @@ async function main () {
   if (!(classicAudio > 0)) fail('klasik modda ses akmıyor (inbound audio bytes=' + classicAudio + ')')
   const classicChain = await pA.eval(`JSON.stringify({ denoise: !!Voice._denoise, gate: !!Voice._ngInt, inGain: !!Voice.inGain })`)
   const cc = JSON.parse(classicChain)
-  if (cc.denoise || cc.gate) fail('klasik modda özel işlem düğümü kurulmuş: ' + classicChain)
+  if (!cc.denoise) fail('klasik modda AI gürültü engelleme düşmüş — asıl korunması gereken buydu: ' + classicChain)
+  if (cc.gate) fail('klasik modda noise gate kurulmuş (zincir atlanmalıydı): ' + classicChain)
   if (!cc.inGain) fail('klasik modda giriş kazancı kurulmadı: ' + classicChain)
-  console.log('PASS: klasik mod — zincirde işlem yok, ses karşıya akıyor (' + classicAudio + ' bayt)')
+  console.log('PASS: klasik mod — gürültü engelleme duruyor, seviye zinciri yok, ses akıyor (' + classicAudio + ' bayt)')
 
   console.log('--- 2b2) Soundboard: olay odada karşıya ulaşıyor')
   if (!(await pA.eval("!!window.Soundboard && Soundboard.sounds.length >= 6"))) fail('Soundboard yüklenmedi')

@@ -2,10 +2,11 @@
 // edilemez), bu yüzden test edilecek saf fonksiyonlar GERÇEK kaynaktan
 // çekilip vm içinde çalıştırılır — formülü teste kopyalamak yerine.
 //
-// Kapsanan iki regresyon:
-//  1) Klasik modda tarayıcı gürültü engellemesi kapalı kalabiliyordu: kullanıcı
-//     daha önce 'dfn'/'strong' seçtiyse noiseSuppression false oluyor, klasik
-//     modda RNNoise da çalışmadığı için mikrofon TAMAMEN korumasız kalıyordu.
+// Kapsanan regresyonlar:
+//  1) Klasik mod gürültü engellemeyi de kapatmıştı. Oysa sesi ezen katman
+//     SEVİYE ZİNCİRİ (filtre+kompresör+makeup+limiter+kapı); gürültü engelleme
+//     (RNNoise/DFN) kullanıcının sevdiği ve korunması gereken parçaydı.
+//     Klasik mod artık yalnız zinciri atlar, gürültü engellemeye dokunmaz.
 //  2) Gürültü kapısının eşiği koda gömülüydü (tepe > 7/128) ve ayarlardaki
 //     hassasiyet kaydırıcısı kapıyı değil "sesle konuş" modunu etkiliyordu →
 //     alçak sesli konuşan kesiliyor, düzeltemiyordu.
@@ -53,11 +54,16 @@ check('varsayılan klasik moddur', () => {
   assert.strictEqual(call(load({ audioMode: 'advanced' }), 'isClassicAudio()'), false)
 })
 
-// ---- 2) klasik modda tarayıcı koruması HER ZAMAN açık ----
-check('klasik: eski dfn/strong seçimi gürültü engellemeyi kapatmaz', () => {
-  for (const noise of ['standard', 'strong', 'dfn']) {
+// ---- 2) klasik mod gürültü engellemeye DOKUNMAZ ----
+// Klasik mod gürültü engellemeyi KAPATMAZ; yalnız seviye zincirini atlar.
+// 'strong'/'dfn' seçiliyken işi RNNoise/DFN yapar → tarayıcı NS kapalı olmalı
+// (çift işleme sesi boğardı). 'standard' seçiliyken tarayıcı NS açık kalır.
+check('klasik: gürültü engelleme seçimi aynen geçerli', () => {
+  const std = call(load({ audioMode: 'classic', noise: 'standard' }), 'micConstraints(false)')
+  assert.strictEqual(std.audio.noiseSuppression, true, 'standard → tarayıcı NS açık')
+  for (const noise of ['strong', 'dfn']) {
     const c = call(load({ audioMode: 'classic', noise }), 'micConstraints(false)')
-    assert.strictEqual(c.audio.noiseSuppression, true, noise + ' modunda NS açık olmalı')
+    assert.strictEqual(c.audio.noiseSuppression, false, noise + ' → işi AI yapar, tarayıcı NS kapalı')
   }
 })
 check('klasik: dengeleme ayarı AGC\'yi kapatmaz (kendi limiter\'ımız yok)', () => {
@@ -66,7 +72,7 @@ check('klasik: dengeleme ayarı AGC\'yi kapatmaz (kendi limiter\'ımız yok)', (
   assert.strictEqual(c.audio.echoCancellation, true)
 })
 check('klasik: stüdyo modu yankı+AGC kapatır (kulaklık senaryosu korunur)', () => {
-  const c = call(load({ audioMode: 'classic', micHQ: true }), 'micConstraints(false)')
+  const c = call(load({ audioMode: 'classic', micHQ: true, noise: 'standard' }), 'micConstraints(false)')
   assert.strictEqual(c.audio.echoCancellation, false)
   assert.strictEqual(c.audio.autoGainControl, false)
   assert.strictEqual(c.audio.noiseSuppression, true)
