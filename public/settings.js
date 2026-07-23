@@ -395,6 +395,25 @@
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!settings.screenAudio
     cb.onchange = () => TurkuazSettings.set('screenAudio', cb.checked)
     scrAudio.append(cb, Object.assign(document.createElement('span'), { className: 'set-track' }))
+    gScr.appendChild(row('Uzaktan kontrol', (() => {
+      const d = document.createElement('div'); d.className = 'set-note-box'
+      d.innerHTML =
+        'Yayın panelindeki <b>🎮 Kontrol iste</b> ile karşının ekranını kullanırsın; ' +
+        'karşı taraf her seferinde onay verir. Kontrol açıkken kare hızı otomatik 60\'a çıkar, ' +
+        'video tamponu sıfırlanır ve pano (düz metin) iki yönlü eşitlenir. ' +
+        '<b>🕹️ Oyun modu</b> imleci kilitler ve göreli fare gönderir — pointer lock kullanan oyunlar için. ' +
+        'Bırakmak: <b>Ctrl+Alt+Esc</b> (Escape artık karşıya gider).'
+      return d
+    })(), 'Kontrol edilen tarafta @nut-tree-fork/nut-js gerekir (kurulumla gelir). Windows\'ta UAC/yönetici pencerelerine girdi gönderilemez — bu bir işletim sistemi kısıtıdır.'))
+    gScr.appendChild(row('İkinci monitör olarak kullanma', (() => {
+      const d = document.createElement('div'); d.className = 'set-note-box'
+      d.innerHTML =
+        'Bir PC\'yi gerçek "2. monitör" yapmak işletim sisteminde <b>sanal ekran sürücüsü</b> ister; ' +
+        'Turkuaz bunu paketleyemez (imzalı sürücü gerekir). Kendin bir sanal ekran sürücüsü kurarsan ' +
+        'Windows\'ta yeni bir ekran belirir — paylaşım sırasında <b>o ekranı seçersen</b> karşı taraf onu ' +
+        'tam ekran görüp kontrol edebilir, yani fiilen ikinci monitör gibi çalışır.'
+      return d
+    })(), 'Çoklu monitörde imleç artık paylaştığın ekrana doğru eşlenir.'))
     gScr.appendChild(row('Ekran sesini de paylaş', scrAudio, '⚠️ Sistem sesinin TAMAMINI yakalar — sesli sohbetteki konuşmalar da yayına gider, karşı taraf kendini duyar (yankı). Sadece bir oyunun/videonun sesini paylaşmak için aç, sonra kapat. Varsayılan kapalı.'))
     gScr.appendChild(row('Video codec',
       selectEl([

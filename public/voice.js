@@ -75,6 +75,9 @@ async function getScreenStreamRaw () {
     if (sources && sources.length > 1) {
       const id = await pickScreen(sources)
       if (!id) throw new Error('picker-iptal')
+      // Uzaktan kontrol bu ekranın sınırlarına göre eşleme yapacak
+      const picked = sources.find(s => s.id === id)
+      Voice._sharedDisplayId = (picked && picked.displayId) || null
       const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxFrameRate: c.video.frameRate } }
       if (c.video.height) video.mandatory.maxHeight = c.video.height.ideal
       if (c.audio) {
@@ -85,6 +88,8 @@ async function getScreenStreamRaw () {
       return await navigator.mediaDevices.getUserMedia({ video })
     }
   }
+  // Tek ekran / tarayıcı yolu: hangi ekran olduğunu bilmiyoruz → birincil varsay
+  Voice._sharedDisplayId = null
   try {
     return await navigator.mediaDevices.getDisplayMedia(c)
   } catch (e) {
@@ -371,9 +376,15 @@ function tuneVideoSender (sender, isScreen, scale = 1) {
   try {
     const p = sender.getParameters()
     if (!p.encodings || !p.encodings.length) p.encodings = [{}]
-    p.encodings[0].maxBitrate = Math.max(150000, Math.round(videoBitrate(isScreen) * scale))
-    // Ekranda çözünürlüğü koru (metin okunsun), kamerada dengeli davran
-    p.degradationPreference = isScreen ? 'maintain-resolution' : 'balanced'
+    // Ekranda çözünürlüğü koru (metin okunsun), kamerada dengeli davran.
+    // AMA biri ekranımızı kontrol ediyorsa tam tersi: akıcılık > netlik.
+    // Kontrol altındayken düşen FPS doğrudan "geç tepki veren fare" demek.
+    const beingControlled = !!(window.RemoteControl && RemoteControl._armed)
+    // Kontrol altında kare hızı yükseldiği için bitrate de yükselmeli, yoksa
+    // encoder aynı bütçeyi daha çok kareye böler → her kare bulanıklaşır.
+    const boost = isScreen && beingControlled ? 1.6 : 1
+    p.encodings[0].maxBitrate = Math.max(150000, Math.round(videoBitrate(isScreen) * scale * boost))
+    p.degradationPreference = !isScreen ? 'balanced' : (beingControlled ? 'maintain-framerate' : 'maintain-resolution')
     sender.setParameters(p).catch(() => {})
   } catch {}
 }
@@ -430,6 +441,19 @@ function applyReceiverLatency (pc, low) {
     if (!r.track || r.track.kind !== 'audio') continue
     try { if ('jitterBufferTarget' in r) r.jitterBufferTarget = ms } catch {}
     try { if ('playoutDelayHint' in r) r.playoutDelayHint = ms == null ? null : ms / 1000 } catch {}
+  }
+}
+
+// Uzaktan kontrol açıkken VİDEO tamponunu da sıfıra çek. WebRTC varsayılan
+// olarak akıcılık için ~100ms+ biriktirir; izlerken iyi, kontrol ederken en
+// büyük gecikme kaynağı bu. Kontrol bitince varsayılana (null) döneriz.
+function applyVideoLatency (pc, controlling) {
+  if (!pc || !pc.getReceivers) return
+  const ms = controlling ? 0 : null
+  for (const r of pc.getReceivers()) {
+    if (!r.track || r.track.kind !== 'video') continue
+    try { if ('jitterBufferTarget' in r) r.jitterBufferTarget = ms } catch {}
+    try { if ('playoutDelayHint' in r) r.playoutDelayHint = ms == null ? null : 0 } catch {}
   }
 }
 
@@ -1020,8 +1044,40 @@ const Voice = {
     }
     return false
   },
+  // Kontrol oturumu açılıp kapandığında çağrılır (RemoteControl).
+  //  - İZLEYEN: gelen videonun jitter tamponunu sıfırla (en büyük gecikme payı)
+  //  - PAYLAŞAN: göndericiyi akıcılık öncelikli moda al (maintain-framerate)
+  onControlSession (active, peerCode) {
+    for (const [code, m] of this.members) {
+      if (!m.pc) continue
+      if (!peerCode || code === peerCode) { try { applyVideoLatency(m.pc, active) } catch {} }
+    }
+    if (this.screen) {
+      for (const [, m] of this.members) {
+        if (!m.pc || !m.pc.getSenders) continue
+        for (const s of m.pc.getSenders()) {
+          if (s.track && s.track.kind === 'video' && this.screen.getTracks().includes(s.track)) {
+            try { tuneVideoSender(s, true) } catch {}
+          }
+        }
+      }
+      // Kontrol altındayken ekran içeriği "hareket" gibi kodlansın (oyun/video)
+      // ve kare hızı ayardan bağımsız olarak en az 60'a çıksın: 15 fps'te
+      // uzaktan oyun oynanmaz, fare "yapış yapış" hissettirir. Kontrol bitince
+      // kullanıcının kendi ayarına dönülür.
+      const userFps = Number((window.TurkuazSettings && TurkuazSettings.get().screenFps) || 15)
+      const fps = active ? Math.max(60, userFps) : userFps
+      for (const t of this.screen.getVideoTracks()) {
+        try { t.contentHint = active ? 'motion' : 'detail' } catch {}
+        try { t.applyConstraints({ frameRate: fps }).catch(() => {}) } catch {}
+      }
+    }
+  },
   // O an ekran paylaşıyor muyum? (karşı taraf beni kontrol edebilsin diye şart)
   amSharing () { return !!this.screen },
+  // Uzaktan kontrol imlecinin DOĞRU monitöre eşlenmesi için: hangi ekranı
+  // paylaşıyoruz? (çoklu monitörde birincil varsayımı imleci yanlış ekrana atar)
+  sharedDisplayId () { return this._sharedDisplayId || null },
   memberName (code) { const m = this.members.get(code); return m ? this.dispName(m) : 'Biri' },
 
   mainStream (m) {

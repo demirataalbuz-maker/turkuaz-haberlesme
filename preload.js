@@ -10,9 +10,15 @@ contextBridge.exposeInMainWorld('turkuazDesktop', {
   },
   remote: {
     available: () => ipcRenderer.invoke('turkuaz-remote-available'),
-    begin: () => ipcRenderer.invoke('turkuaz-remote-begin'),
+    // opts.displayId: paylaşılan ekranın display id'si (çoklu monitör)
+    begin: (opts) => ipcRenderer.invoke('turkuaz-remote-begin', opts || {}),
     end: () => ipcRenderer.invoke('turkuaz-remote-end'),
-    input: (ev) => ipcRenderer.invoke('turkuaz-remote-input', ev)
+    input: (ev) => ipcRenderer.invoke('turkuaz-remote-input', ev),
+    releaseAll: () => ipcRenderer.invoke('turkuaz-remote-release-all'),
+    // İzleyen tarafı: yalnız pano kapısını açar, enjeksiyonu DEĞİL
+    setControlling: (on) => ipcRenderer.invoke('turkuaz-remote-set-controlling', !!on),
+    clipboardRead: () => ipcRenderer.invoke('turkuaz-remote-clipboard-read'),
+    clipboardWrite: (text) => ipcRenderer.invoke('turkuaz-remote-clipboard-write', text)
   },
   shortcuts: {
     isGlobalMuteActive: () => ipcRenderer.invoke('turkuaz-shortcut-global-mute-active'),

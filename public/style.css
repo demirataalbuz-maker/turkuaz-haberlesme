@@ -1243,6 +1243,8 @@ button { font-family: inherit; }
   border: 0; background: rgba(0,0,0,.25); color: #fff;
   border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px;
 }
+/* Oyun modu açıkken buton belli olsun: imleç kilitli, göreli fare gidiyor */
+.rc-indicator button.rc-game.on { background: #fff; color: var(--tq); }
 /* Paylaşan: "kontrol ediliyor" uyarı bandı (üst orta, dikkat çekici) */
 .rc-banner {
   position: fixed; top: 0; left: 50%; transform: translateX(-50%);

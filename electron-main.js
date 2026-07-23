@@ -268,7 +268,8 @@ async function start () {
     requireTrustedRenderer(event)
     try {
       const sources = await getSourcesSafe({ types: ['screen'], thumbnailSize: { width: 320, height: 180 } })
-      return sources.map(s => ({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL() }))
+      // display_id: uzaktan kontrolde imleci DOĞRU monitöre eşlemek için şart
+      return sources.map(s => ({ id: s.id, name: s.name, thumb: s.thumbnail.toDataURL(), displayId: s.display_id }))
     } catch { return [] }
   })
   ipcMain.handle('turkuaz-update-get-state', (event) => {
@@ -330,33 +331,72 @@ async function start () {
   // girdi paketi SESSİZCE reddedilir — böylece kaçak/gecikmiş paket iş yapamaz.
   const remoteInput = require('./lib/remote-input')
   let rcArmed = false
-  let rcSize = null // { width, height } paylaşılan ekran çözünürlüğü
+  let rcSize = null // { width, height, x, y } paylaşılan EKRANIN masaüstündeki yeri
+  // Paylaşılan ekranın gerçek sınırlarını bul. desktopCapturer kaynak id'si
+  // "screen:<display_id>:0" biçiminde; display_id ile Electron'un display
+  // listesinden bounds alınır. Bulunamazsa birincil ekrana düşülür — yoksa
+  // ikinci monitör paylaşıldığında imleç yanlış ekrana giderdi.
+  function boundsForDisplay (displayId) {
+    try {
+      const { screen } = require('electron')
+      const all = screen.getAllDisplays()
+      const hit = displayId != null && all.find(d => String(d.id) === String(displayId))
+      const d = hit || screen.getPrimaryDisplay()
+      if (d && d.bounds) {
+        const sf = d.scaleFactor || 1
+        // nut-js fiziksel piksel kullanır; Electron bounds DIP cinsindendir.
+        return {
+          x: Math.round(d.bounds.x * sf),
+          y: Math.round(d.bounds.y * sf),
+          width: Math.round(d.bounds.width * sf),
+          height: Math.round(d.bounds.height * sf)
+        }
+      }
+    } catch {}
+    return null
+  }
   ipcMain.handle('turkuaz-remote-available', (event) => {
     requireTrustedRenderer(event)
     return remoteInput.available()
   })
-  ipcMain.handle('turkuaz-remote-begin', async (event) => {
+  ipcMain.handle('turkuaz-remote-begin', async (event, opts) => {
     requireTrustedRenderer(event)
     if (!remoteInput.available()) return { ok: false }
-    rcSize = await remoteInput.screenSize()
+    const displayId = opts && opts.displayId
+    rcSize = boundsForDisplay(displayId)
+    if (!rcSize) {
+      const s = await remoteInput.screenSize()   // yedek: nut-js birincil ekran
+      rcSize = s ? { x: 0, y: 0, width: s.width, height: s.height } : null
+    }
     if (!rcSize) return { ok: false }
     rcArmed = true
     return { ok: true, width: rcSize.width, height: rcSize.height }
   })
-  ipcMain.handle('turkuaz-remote-end', (event) => {
+  ipcMain.handle('turkuaz-remote-end', async (event) => {
     requireTrustedRenderer(event)
     rcArmed = false
     rcSize = null
+    // Basılı kalan tuş/düğme bırakılmazsa karşı makine kilitli kalır
+    await remoteInput.releaseAll()
     return true
   })
-  // Girdi uygula. ev: {k:'m',x,y} | {k:'d'|'u',b} | {k:'w',dy} | {k:'kd'|'ku',code}
+  // Oturumu kapatmadan basılı tuş/düğmeleri bırak (izleyen odağı kaybetti).
+  ipcMain.handle('turkuaz-remote-release-all', async (event) => {
+    requireTrustedRenderer(event)
+    if (!rcArmed) return false
+    await remoteInput.releaseAll()
+    return true
+  })
+  // Girdi uygula. ev: {k:'m',x,y} | {k:'r',dx,dy} | {k:'d'|'u',b}
+  //                  | {k:'w',dy} | {k:'kd'|'ku',code}
   ipcMain.handle('turkuaz-remote-input', async (event, ev) => {
     requireTrustedRenderer(event)
     if (!rcArmed || !rcSize || !ev || typeof ev !== 'object') return false
-    const { width: w, height: h } = rcSize
+    const { width: w, height: h, x: ox, y: oy } = rcSize
     try {
       switch (ev.k) {
-        case 'm': await remoteInput.moveTo(ev.x, ev.y, w, h); break
+        case 'm': await remoteInput.moveTo(ev.x, ev.y, w, h, ox, oy); break
+        case 'r': await remoteInput.moveBy(ev.dx, ev.dy); break
         case 'd': await remoteInput.button(true, ev.b); break
         case 'u': await remoteInput.button(false, ev.b); break
         case 'w': await remoteInput.scroll(ev.dy); break
@@ -365,6 +405,37 @@ async function start () {
       }
     } catch {}
     return true
+  })
+  // İZLEYEN tarafı da bir kontrol oturumunun içindedir ama enjeksiyon yapmaz
+  // (rcArmed açılmaz). Pano senkronu iki yönlü olduğu için izleyene ayrı,
+  // DAR bir kapı: yalnız panoyu açar, girdi enjeksiyonunu asla açmaz.
+  let rcControlling = false
+  ipcMain.handle('turkuaz-remote-set-controlling', (event, on) => {
+    requireTrustedRenderer(event)
+    rcControlling = !!on
+    return true
+  })
+  const rcInSession = () => rcArmed || rcControlling
+  // Pano senkronu — yalnız aktif kontrol oturumunda, yalnız DÜZ METİN.
+  // Resim/dosya panosu bilerek dışarıda: sessizce büyük veri sızdırmasın.
+  const RC_CLIP_MAX = 100 * 1024
+  ipcMain.handle('turkuaz-remote-clipboard-read', (event) => {
+    requireTrustedRenderer(event)
+    if (!rcInSession()) return null
+    try {
+      const { clipboard } = require('electron')
+      const t = clipboard.readText()
+      return typeof t === 'string' && t.length <= RC_CLIP_MAX ? t : null
+    } catch { return null }
+  })
+  ipcMain.handle('turkuaz-remote-clipboard-write', (event, text) => {
+    requireTrustedRenderer(event)
+    if (!rcInSession() || typeof text !== 'string' || text.length > RC_CLIP_MAX) return false
+    try {
+      const { clipboard } = require('electron')
+      clipboard.writeText(text)
+      return true
+    } catch { return false }
   })
 
   ipcMain.handle('turkuaz-shortcut-global-mute-active', (event) => {

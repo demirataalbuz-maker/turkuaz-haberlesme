@@ -20,9 +20,12 @@
     _pendingReqTo: null,     // gönderdiğim isteğin hedefi (grant beklenen)
     controllerCode: null,    // PAYLAŞAN: beni kontrol eden peer
     _armed: false,           // PAYLAŞAN: OS enjeksiyonu açık mı
+    relative: false,         // İZLEYEN: oyun modu (pointer lock + göreli fare)
     _banner: null,
     _indicator: null,
-    _lastMove: 0
+    _lastMove: 0,
+    _clipTimer: null,
+    _lastClip: null
   }
 
   const desktop = () => (typeof window !== 'undefined' && window.turkuazDesktop && window.turkuazDesktop.remote) || null
@@ -62,7 +65,8 @@
     if (!v) return
     this._attachCapture(v)
     this._showIndicator()
-    if (window.toast) toast('Kontrol sende — bırakmak için Esc.', 'success')
+    if (window.Voice && Voice.onControlSession) Voice.onControlSession(true, code)
+    if (window.toast) toast('Kontrol sende — bırakmak için Ctrl+Alt+Esc.', 'success')
   }
 
   RC.stopControlling = function (notify = true) {
@@ -70,8 +74,10 @@
     if (notify) send(this.controllingCode, { c: 'end' })
     this._detachCapture()
     this._hideIndicator()
+    if (window.Voice && Voice.onControlSession) Voice.onControlSession(false, this.controllingCode)
     this.controllingCode = null
     this._controlVideo = null
+    this.relative = false
   }
 
   // Video üstündeki fare/klavye olaylarını yakala → normalize et → yolla.
@@ -97,25 +103,42 @@
     // (Buradan desktop().input() çağırmak kendi makinemizi sürmek olurdu.)
     const inp = (ev) => {
       if (this.controllingCode !== code) return
-      send(code, { c: ev.k, x: ev.x, y: ev.y, b: ev.b, dy: ev.dy, code: ev.code })
+      send(code, { c: ev.k, x: ev.x, y: ev.y, dx: ev.dx, dy: ev.dy, b: ev.b, code: ev.code })
     }
     const h = {}
     h.move = (e) => {
       const now = performance.now()
-      if (now - this._lastMove < 16) return // ~60/sn üst sınır
+      if (now - this._lastMove < 8) return // ~120/sn üst sınır (oyun için 60 azdı)
       this._lastMove = now
+      // Oyun modu (pointer lock): mutlak konum yok, delta gönderilir. FPS/3B
+      // oyunlar imleci yakaladığı için mutlak konumlama işe yaramıyor.
+      if (this.relative && document.pointerLockElement === v) {
+        const dx = e.movementX || 0, dy = e.movementY || 0
+        if (dx || dy) inp({ k: 'r', dx, dy })
+        return
+      }
       const p = this._normXY(v, e.clientX, e.clientY)
       if (p) inp({ k: 'm', x: p.x, y: p.y })
     }
-    h.down = (e) => { e.preventDefault(); const p = this._normXY(v, e.clientX, e.clientY); if (p) inp({ k: 'm', x: p.x, y: p.y }); inp({ k: 'd', b: e.button }) }
+    h.down = (e) => {
+      e.preventDefault()
+      if (this.relative && document.pointerLockElement !== v) { try { v.requestPointerLock() } catch {}; return }
+      if (!this.relative) { const p = this._normXY(v, e.clientX, e.clientY); if (p) inp({ k: 'm', x: p.x, y: p.y }) }
+      inp({ k: 'd', b: e.button })
+    }
     h.up = (e) => { e.preventDefault(); inp({ k: 'u', b: e.button }) }
     h.wheel = (e) => { e.preventDefault(); inp({ k: 'w', dy: e.deltaY > 0 ? 3 : -3 }) }
     h.ctx = (e) => e.preventDefault()
     h.key = (e) => {
-      if (e.key === 'Escape') { this.stopControlling(); return }
+      // Kontrolü bırakma: Ctrl+Alt+Esc (paylaşandaki kesme kısayolunun eşi).
+      // Escape TEK BAŞINA artık karşıya GİDER — yoksa uzaktaki hiçbir diyalog
+      // kapatılamıyordu (v0.16.1'e kadarki eksik).
+      if (e.ctrlKey && e.altKey && e.key === 'Escape') { e.preventDefault(); this.stopControlling(); return }
       e.preventDefault()
       inp({ k: e.type === 'keydown' ? 'kd' : 'ku', code: e.code })
     }
+    // Odak kaybında basılı tuşlar karşıda kilitli kalmasın
+    h.blur = () => { if (this.controllingCode === code) send(code, { c: 'relall' }) }
     v.addEventListener('pointermove', h.move)
     v.addEventListener('pointerdown', h.down)
     v.addEventListener('pointerup', h.up)
@@ -123,10 +146,12 @@
     v.addEventListener('contextmenu', h.ctx)
     window.addEventListener('keydown', h.key, true)
     window.addEventListener('keyup', h.key, true)
-    v.style.cursor = 'crosshair'
+    window.addEventListener('blur', h.blur)
+    v.style.cursor = this.relative ? 'none' : 'crosshair'
     v.tabIndex = 0
     try { v.focus() } catch {}
     this._capture = { v, h }
+    this._startClipboardSync()
   }
   RC._detachCapture = function () {
     const c = this._capture
@@ -139,16 +164,66 @@
     v.removeEventListener('contextmenu', h.ctx)
     window.removeEventListener('keydown', h.key, true)
     window.removeEventListener('keyup', h.key, true)
+    window.removeEventListener('blur', h.blur)
     v.style.cursor = ''
+    try { if (document.pointerLockElement === v) document.exitPointerLock() } catch {}
     this._capture = null
+    this._stopClipboardSync()
+  }
+
+  // Oyun modu: pointer lock + göreli fare. Video'ya tıklayınca imleç kilitlenir.
+  RC.setRelative = function (on) {
+    this.relative = !!on
+    const c = this._capture
+    if (!c) return
+    c.v.style.cursor = this.relative ? 'none' : 'crosshair'
+    if (!this.relative) { try { if (document.pointerLockElement === c.v) document.exitPointerLock() } catch {} }
+  }
+
+  // ---------- pano senkronu (iki yönlü, yalnız düz metin) ----------
+  // Yerel pano değişince karşıya yollanır. Tarayıcı panoyu olay olarak
+  // bildirmediği için kısa aralıkla yoklanır (masaüstünde Electron clipboard).
+  RC._startClipboardSync = function () {
+    const d = desktop()
+    if (!d || !d.clipboardRead) return
+    try { d.setControlling && d.setControlling(true) } catch {}
+    this._clipTimer = setInterval(async () => {
+      const peer = this.controllingCode || this.controllerCode
+      if (!peer) return
+      let t = null
+      try { t = await d.clipboardRead() } catch {}
+      if (typeof t !== 'string' || t === this._lastClip) return
+      this._lastClip = t
+      send(peer, { c: 'clip', t })
+    }, 700)
+  }
+  RC._stopClipboardSync = function () {
+    if (this._clipTimer) { clearInterval(this._clipTimer); this._clipTimer = null }
+    this._lastClip = null
+    const d = desktop()
+    try { d && d.setControlling && d.setControlling(false) } catch {}
+  }
+  RC._applyClipboard = async function (text) {
+    const d = desktop()
+    if (!d || !d.clipboardWrite || typeof text !== 'string') return
+    this._lastClip = text // kendi yazdığımızı geri yollamayalım (eko döngüsü)
+    try { await d.clipboardWrite(text) } catch {}
   }
 
   RC._showIndicator = function () {
     if (this._indicator) return
     const el = document.createElement('div')
     el.className = 'rc-indicator'
-    el.innerHTML = '<span>🎮 Uzaktan kontrol sende</span><button>Bırak (Esc)</button>'
-    el.querySelector('button').onclick = () => this.stopControlling()
+    el.innerHTML = '<span>🎮 Uzaktan kontrol sende</span>' +
+      '<button class="rc-game" title="Oyun modu: imleci kilitler, göreli fare gönderir">🕹️ Oyun modu</button>' +
+      '<button class="rc-drop">Bırak (Ctrl+Alt+Esc)</button>'
+    const gameBtn = el.querySelector('.rc-game')
+    gameBtn.onclick = () => {
+      this.setRelative(!this.relative)
+      gameBtn.classList.toggle('on', this.relative)
+      gameBtn.textContent = this.relative ? '🕹️ Oyun modu açık' : '🕹️ Oyun modu'
+    }
+    el.querySelector('.rc-drop').onclick = () => this.stopControlling()
     document.body.appendChild(el)
     this._indicator = el
   }
@@ -185,10 +260,14 @@
     const d = desktop()
     if (!d) return send(from, { c: 'deny', reason: 'unavailable' })
     let res = null
-    try { res = await d.begin() } catch {}
+    // Hangi ekranı paylaşıyorsak imleç O ekrana eşlensin (çoklu monitör).
+    const displayId = (window.Voice && Voice.sharedDisplayId && Voice.sharedDisplayId()) || null
+    try { res = await d.begin({ displayId }) } catch {}
     if (!res || !res.ok) { this._armed = false; return send(from, { c: 'deny', reason: 'unavailable' }) }
     this.controllerCode = from
     this._armed = true
+    this._startClipboardSync()
+    if (window.Voice && Voice.onControlSession) Voice.onControlSession(true, from)
     send(from, { c: 'grant' })
     this._showBanner(Voice.memberName(from))
     // Güvenlik hotkey: Ctrl+Alt+Esc ile anında kes
@@ -202,7 +281,10 @@
     if (notify && who) send(who, { c: 'stop' })
     this.controllerCode = null
     this._armed = false
+    // end() main tarafında basılı kalan tuş/düğmeleri de bırakır
     try { desktop() && desktop().end() } catch {}
+    this._stopClipboardSync()
+    if (window.Voice && Voice.onControlSession) Voice.onControlSession(false, who)
     this._hideBanner()
     if (this._revokeKey) { window.removeEventListener('keydown', this._revokeKey, true); this._revokeKey = null }
   }
@@ -243,9 +325,21 @@
       case 'req': this._onRequest(from); break
       case 'end': if (this.controllerCode === from) { this.revoke(false); if (window.toast) toast('Kontrol bırakıldı.', 'info') } break
       // girdi olayları — yalnız aktif controller'dan ve armed iken
-      case 'm': case 'd': case 'u': case 'w': case 'kd': case 'ku':
+      case 'm': case 'r': case 'd': case 'u': case 'w': case 'kd': case 'ku':
         if (this._armed && this.controllerCode === from && desktop()) {
-          desktop().input({ k: m.c, x: m.x, y: m.y, b: m.b, dy: m.dy, code: m.code })
+          desktop().input({ k: m.c, x: m.x, y: m.y, dx: m.dx, dy: m.dy, b: m.b, code: m.code })
+        }
+        break
+      // izleyen odağı kaybetti → basılı tuşları bırak (oturum açık kalır)
+      case 'relall':
+        if (this._armed && this.controllerCode === from && desktop() && desktop().releaseAll) {
+          try { desktop().releaseAll() } catch {}
+        }
+        break
+      // pano senkronu — iki yönlü, yalnız aktif oturumdaki karşı taraftan
+      case 'clip':
+        if ((this.controllerCode === from && this._armed) || this.controllingCode === from) {
+          this._applyClipboard(m.t)
         }
         break
     }
