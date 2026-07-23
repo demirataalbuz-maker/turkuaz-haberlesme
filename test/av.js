@@ -126,8 +126,10 @@ class Srv {
   async connect () {
     for (let i = 0; i < 80; i++) {
       try {
+        // WS oturum token'ı zorunlu (bkz. server.js WS güvenliği)
+        const tok = (await (await fetch('http://127.0.0.1:' + this.port + '/token')).text()).trim()
         await new Promise((res, rej) => {
-          const ws = new WebSocket('ws://127.0.0.1:' + this.port)
+          const ws = new WebSocket('ws://127.0.0.1:' + this.port, ['turkuaz.v1', 'turkuaz.tok.' + tok])
           // Dinleyici open'dan ÖNCE takılmalı: sunucu ilk state'i bağlanır
           // bağlanmaz yollar; el sıkışmayla aynı TCP okumasında gelirse ws
           // open+message'ı aynı tick'te işler ve geç takılan dinleyici ilk

@@ -72,8 +72,11 @@ class Client {
     }
     for (let i = 0; i < 40; i++) {
       try {
+        // Gerçek arayüz gibi: önce /token'dan oturum token'ını al, WS
+        // el sıkışmasında subprotocol olarak sun (bkz. server.js WS güvenliği)
+        const tok = (await (await fetch('http://127.0.0.1:' + this.port + '/token')).text()).trim()
         await new Promise((resolve, reject) => {
-          const ws = new WebSocket('ws://127.0.0.1:' + this.port)
+          const ws = new WebSocket('ws://127.0.0.1:' + this.port, ['turkuaz.v1', 'turkuaz.tok.' + tok])
           ws.on('message', onMessage)
           ws.on('open', () => { this.ws = ws; resolve() })
           ws.on('error', reject)
@@ -114,6 +117,17 @@ async function main () {
   await veli.connect()
   await ali.waitFor('state geldi', c => !!c.state)
   await veli.waitFor('state geldi', c => !!c.state)
+
+  console.log('--- 0) token\'sız/yanlış token\'lı WS bağlantısı reddedilmeli')
+  for (const protos of [undefined, ['turkuaz.v1', 'turkuaz.tok.' + 'a'.repeat(64)]]) {
+    const rejected = await new Promise((resolve) => {
+      const bad = protos ? new WebSocket('ws://127.0.0.1:3311', protos) : new WebSocket('ws://127.0.0.1:3311')
+      bad.on('open', () => { try { bad.close() } catch {}; resolve(false) })
+      bad.on('error', () => resolve(true))
+    })
+    if (!rejected) fail('token doğrulaması atlatıldı: yetkisiz WS bağlantısı kabul edildi')
+  }
+  console.log('PASS: yetkisiz WS bağlantıları reddedildi')
 
   ali.send({ t: 'set-profile', name: 'Ali', avatar: '🦊' })
   veli.send({ t: 'set-profile', name: 'Veli', avatar: '🐺' })

@@ -81,8 +81,10 @@ class ServerDriver {
     const deadline = Date.now() + START_TIMEOUT
     while (Date.now() < deadline) {
       try {
+        // WS oturum token'ı zorunlu (bkz. server.js WS güvenliği)
+        const tok = (await (await fetch(`http://127.0.0.1:${this.client.port}/token`)).text()).trim()
         await new Promise((resolve, reject) => {
-          const ws = new WebSocket(`ws://127.0.0.1:${this.client.port}`)
+          const ws = new WebSocket(`ws://127.0.0.1:${this.client.port}`, ['turkuaz.v1', 'turkuaz.tok.' + tok])
           const timer = setTimeout(() => {
             ws.terminate()
             reject(new Error('WS zaman asimi'))

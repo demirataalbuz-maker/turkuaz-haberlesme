@@ -877,6 +877,7 @@ const Voice = {
         preferVideoCodec(m.pc)
       }
     } else {
+      if (window.RemoteControl) RemoteControl.onShareStopped() // kontrol oturumu varsa kapat
       this._removeVideoSenders(t => this.screen.getTracks().includes(t))
       this.screen.getTracks().forEach(t => t.stop())
       this.screen = null
@@ -935,6 +936,7 @@ const Voice = {
     }
     preferVideoCodec(pc)
     preferAudioRed(pc) // Opus RED — kayıp zırhı
+    this._setupCtrlChannel(m) // uzaktan kontrol veri kanalı (ekran paylaşımı)
 
     pc.onicecandidate = (e) => this.sendRtc(m.code, { kind: 'ice', cand: e.candidate })
     pc.onnegotiationneeded = async () => {
@@ -990,6 +992,38 @@ const Voice = {
     }
   },
 
+  // ---- uzaktan kontrol veri kanalı ----
+  // Kontrol olayları (fare/klavye) düşük gecikmeli, sıralı bir RTCDataChannel
+  // üzerinden gider (DHT sinyal rölesi değil). Kanalı tek taraf açsın diye
+  // 'polite' kutupluluğu kullanılır: impolite (polite=false) taraf açar,
+  // polite taraf ondatachannel ile alır. Böylece çift kanal olmaz.
+  _setupCtrlChannel (m) {
+    const pc = m.pc
+    if (!m.polite) {
+      try { this._wireCtrl(m, pc.createDataChannel('turkuaz-ctrl', { ordered: true })) } catch {}
+    } else {
+      pc.addEventListener('datachannel', (e) => {
+        if (e.channel && e.channel.label === 'turkuaz-ctrl') this._wireCtrl(m, e.channel)
+      })
+    }
+  },
+  _wireCtrl (m, dc) {
+    m.ctrlDC = dc
+    dc.onmessage = (e) => { if (window.RemoteControl) RemoteControl.onMessage(m.code, e.data) }
+    dc.onclose = () => { if (window.RemoteControl) RemoteControl.onPeerGone(m.code) }
+  },
+  // RemoteControl buradan mesaj yollar (JSON). Kanal hazır değilse false.
+  ctrlSend (code, obj) {
+    const m = this.members.get(code)
+    if (m && m.ctrlDC && m.ctrlDC.readyState === 'open') {
+      try { m.ctrlDC.send(JSON.stringify(obj)); return true } catch {}
+    }
+    return false
+  },
+  // O an ekran paylaşıyor muyum? (karşı taraf beni kontrol edebilsin diye şart)
+  amSharing () { return !!this.screen },
+  memberName (code) { const m = this.members.get(code); return m ? this.dispName(m) : 'Biri' },
+
   mainStream (m) {
     for (const [id, s] of Object.entries(m.streams)) if (id !== m.screenSid) return s
     return null
@@ -1038,6 +1072,7 @@ const Voice = {
     if (m.audioEl) { m.audioEl.srcObject = null; m.audioEl = null }
     if (m.bubble) m.bubble.remove()
     this.members.delete(code)
+    if (window.RemoteControl) RemoteControl.onPeerGone(code) // kontrol oturumu varsa kapat
     if (this._focusCode === code) { this._focusCode = null; this.applyGains() } // odaktaki ayrıldı
     this.sync()
   },
@@ -1676,6 +1711,7 @@ const Voice = {
     el.innerHTML =
       '<div class="sp-head"><span class="sp-label"></span>' +
       '<span class="sp-actions">' +
+      (!a.mine ? '<button class="sp-ctrl-req" title="Bu ekranı uzaktan kontrol et" hidden>🎮 Kontrol iste</button>' : '') +
       '<button class="sp-full" title="Büyüt / küçült (çift tıkla)">⛶</button>' +
       '<button class="sp-close" title="Yayından çık">✕</button>' +
       '</span></div>' +
@@ -1712,6 +1748,12 @@ const Voice = {
       full.title = max ? 'Küçült' : 'Büyüt'
     }
     video.ondblclick = () => full.click()
+    // Uzaktan kontrol iste (yalnız uzak yayın + masaüstü + native varsa görünür)
+    const req = el.querySelector('.sp-ctrl-req')
+    if (req && !a.mine && window.RemoteControl) {
+      RemoteControl.canRequest(a.key).then((ok) => { if (ok) req.hidden = false })
+      req.onclick = () => RemoteControl.requestControl(a.key, video)
+    }
     this._makePanelDraggable(el, el.querySelector('.sp-head'))
     for (const h of el.querySelectorAll('.sp-rz')) this._makePanelResize(el, h, h.dataset.dir)
     return { el, video, label }

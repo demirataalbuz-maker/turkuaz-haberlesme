@@ -26,7 +26,8 @@
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "dist:win": "electron-builder --win nsis --publish never",
     "release:check": "node scripts/check-release.js",
-    "test": "node test/updater.js && node test/update-artifacts.js && node test/security.js && node test/core.js && node test/e2e.js",
+    "test": "node test/updater.js && node test/update-artifacts.js && node test/security.js && node test/core.js && node test/remote.js && node test/e2e.js",
+    "test:remote": "node test/remote.js",
     "test:core": "node test/core.js",
     "test:security": "node test/security.js",
     "test:updater": "node test/updater.js",
@@ -87,6 +88,9 @@
     "hyperswarm": "^4.8.0",
     "sodium-universal": "^4.0.1",
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@nut-tree-fork/nut-js": "^4.2.0"
   },
   "devDependencies": {
     "@jitsi/rnnoise-wasm": "^0.2.1",

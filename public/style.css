@@ -1152,3 +1152,109 @@ button { font-family: inherit; }
 /* içinde konuşan olan bölge canlanır (mekân yaşıyor) */
 .lr-zone.live { border-style: solid; box-shadow: inset 0 0 34px rgba(45, 212, 191, .11); }
 .lr-zone.live .lr-zone-label { color: var(--tq); opacity: 1; }
+
+/* ---- Kilit ekranı (disk kasası) ---- */
+#lock-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg0);
+}
+#lock-screen.hidden { display: none; }
+.lock-card {
+  width: min(92vw, 380px);
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px 28px;
+  text-align: center;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .45);
+}
+.lock-logo { font-size: 42px; margin-bottom: 6px; }
+.lock-card h2 { margin: 0 0 6px; }
+.lock-card p { margin: 0 0 18px; opacity: .75; font-size: 14px; line-height: 1.45; }
+.lock-card form { display: flex; flex-direction: column; gap: 10px; }
+.lock-card input[type="password"] {
+  width: 100%; box-sizing: border-box;
+  padding: 11px 12px; border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  color: inherit; font-size: 15px; text-align: center;
+}
+.lock-card input[type="password"]:focus { outline: 2px solid var(--tq); border-color: transparent; }
+.lock-err { min-height: 20px; margin-top: 10px; color: var(--danger); font-size: 13px; }
+
+/* Okundu bilgisi işaretleri (✓ iletildi / ✓✓ görüldü) */
+.msg-seen-mark { font-size: 10px; margin-left: 6px; opacity: .4; user-select: none; }
+.msg-seen-mark.seen { color: var(--tq); opacity: .95; }
+.msg-status { margin-top: 2px; text-align: right; }
+
+/* Sessize alma düğmesi */
+.action-mute { font-size: 14px; }
+.action-mute.muted { opacity: .6; }
+
+/* Kısayol listesi */
+.sc-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 4px; }
+.sc-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; font-size: 14px; }
+.sc-row kbd {
+  display: inline-block; padding: 2px 7px; border-radius: 6px;
+  background: var(--bg3); border: 1px solid var(--line);
+  border-bottom-width: 2px; font: 12px/1.4 inherit;
+}
+
+/* Dosya önizleme tepsisi (gönderim öncesi) */
+#attach-tray {
+  margin: 0 16px 8px; padding: 10px;
+  background: var(--bg3); border: 1px solid var(--line); border-radius: var(--r);
+}
+#attach-tray.hidden { display: none; }
+#attach-list { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.attach-chip {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg1); border: 1px solid var(--line); border-radius: var(--rs);
+  padding: 6px 8px; max-width: 240px;
+}
+.attach-chip img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; }
+.attach-ico { font-size: 20px; }
+.attach-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
+.attach-size { font-size: 11px; color: var(--tx3); flex-shrink: 0; }
+.attach-x {
+  border: 0; background: none; color: var(--tx3); cursor: pointer;
+  font-size: 12px; padding: 2px 4px; border-radius: 4px;
+}
+.attach-x:hover { color: var(--danger); background: var(--bg3); }
+.attach-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#messages.drop-hint { outline: 2px dashed var(--tq); outline-offset: -8px; }
+
+/* ---- Uzaktan kontrol ---- */
+.sp-ctrl-req {
+  background: var(--tq-soft); color: var(--tq);
+  border: 1px solid var(--tq); border-radius: 6px;
+  font-size: 12px; padding: 2px 8px; cursor: pointer;
+}
+.sp-ctrl-req:hover { background: var(--tq); color: var(--bg0); }
+/* İzleyen: "kontrol sende" göstergesi (alt orta) */
+.rc-indicator {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  z-index: 9998; display: flex; align-items: center; gap: 12px;
+  background: var(--tq); color: var(--bg0); font-weight: 600;
+  padding: 8px 14px; border-radius: 999px; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+}
+.rc-indicator button {
+  border: 0; background: rgba(0,0,0,.25); color: #fff;
+  border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+}
+/* Paylaşan: "kontrol ediliyor" uyarı bandı (üst orta, dikkat çekici) */
+.rc-banner {
+  position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  z-index: 10000; display: flex; align-items: center; gap: 14px;
+  background: var(--danger); color: #fff; font-weight: 600;
+  padding: 8px 16px; border-radius: 0 0 12px 12px; box-shadow: 0 6px 24px rgba(0,0,0,.45);
+}
+.rc-banner button {
+  border: 0; background: rgba(0,0,0,.28); color: #fff;
+  border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 12px;
+}
+.rc-consent .danger-btn {
+  background: var(--danger); color: #fff; border: 0;
+  border-radius: 8px; padding: 8px 16px; cursor: pointer;
+}

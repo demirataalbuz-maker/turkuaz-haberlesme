@@ -323,6 +323,50 @@ async function start () {
     try { notification.close() } catch {}
     return true
   })
+  // ---- uzaktan kontrol (ekran paylaşımı) ----
+  // Native girdi enjeksiyonu (nut-js) burada. Güvenlik kapısı: girdi ancak
+  // "armed" (kullanıcı onaylı, aktif) bir oturumda uygulanır. Renderer önce
+  // begin() ile oturumu açar; end() ile kapatır. Armed değilken gelen her
+  // girdi paketi SESSİZCE reddedilir — böylece kaçak/gecikmiş paket iş yapamaz.
+  const remoteInput = require('./lib/remote-input')
+  let rcArmed = false
+  let rcSize = null // { width, height } paylaşılan ekran çözünürlüğü
+  ipcMain.handle('turkuaz-remote-available', (event) => {
+    requireTrustedRenderer(event)
+    return remoteInput.available()
+  })
+  ipcMain.handle('turkuaz-remote-begin', async (event) => {
+    requireTrustedRenderer(event)
+    if (!remoteInput.available()) return { ok: false }
+    rcSize = await remoteInput.screenSize()
+    if (!rcSize) return { ok: false }
+    rcArmed = true
+    return { ok: true, width: rcSize.width, height: rcSize.height }
+  })
+  ipcMain.handle('turkuaz-remote-end', (event) => {
+    requireTrustedRenderer(event)
+    rcArmed = false
+    rcSize = null
+    return true
+  })
+  // Girdi uygula. ev: {k:'m',x,y} | {k:'d'|'u',b} | {k:'w',dy} | {k:'kd'|'ku',code}
+  ipcMain.handle('turkuaz-remote-input', async (event, ev) => {
+    requireTrustedRenderer(event)
+    if (!rcArmed || !rcSize || !ev || typeof ev !== 'object') return false
+    const { width: w, height: h } = rcSize
+    try {
+      switch (ev.k) {
+        case 'm': await remoteInput.moveTo(ev.x, ev.y, w, h); break
+        case 'd': await remoteInput.button(true, ev.b); break
+        case 'u': await remoteInput.button(false, ev.b); break
+        case 'w': await remoteInput.scroll(ev.dy); break
+        case 'kd': await remoteInput.key(true, ev.code); break
+        case 'ku': await remoteInput.key(false, ev.code); break
+      }
+    } catch {}
+    return true
+  })
+
   ipcMain.handle('turkuaz-shortcut-global-mute-active', (event) => {
     requireTrustedRenderer(event)
     return muteShortcutRegistered

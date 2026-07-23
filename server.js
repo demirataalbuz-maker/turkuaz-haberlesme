@@ -5,9 +5,11 @@
 const path = require('path')
 const http = require('http')
 const fs = require('fs')
+const crypto = require('crypto')
 const express = require('express')
 const { WebSocketServer } = require('ws')
 const Store = require('./lib/store')
+const vaultLib = require('./lib/vault')
 const { createCore, DEFAULT_ICE } = require('./lib/core')
 const { safeFetch } = require('./lib/urlguard')
 
@@ -40,18 +42,54 @@ else if (!process.env.TURKUAZ_NO_DEFAULT_TURN) { iceServers = DEFAULT_ICE; conso
 else { iceServers = []; console.log('TURN devre dışı (yalnızca doğrudan bağlantı)') }
 
 const store = new Store(DATA)
-const core = createCore({
-  store,
-  bootstrap: BOOTSTRAP,
-  iceServers,
-  version: require('./package.json').version,
-  log: console.log,
-  exit: (code) => process.exit(code)
-})
+// Kasa (disk şifreleme) kuruluysa çekirdek, doğru parola gelene kadar
+// BAŞLATILMAZ: kimlik/mesajlar diskte şifreli, anahtar yok. Arayüz kilit
+// ekranı gösterir; {t:'unlock'} doğrulanınca startCore() çalışır.
+let core = null
+function startCore () {
+  core = createCore({
+    store,
+    bootstrap: BOOTSTRAP,
+    iceServers,
+    version: require('./package.json').version,
+    log: console.log,
+    exit: (code) => process.exit(code)
+  })
+  // çekirdekten gelen her yayını bağlı tüm arayüzlere ilet
+  core.onUI((obj) => {
+    const s = JSON.stringify(obj)
+    for (const c of clients) { try { c.send(s) } catch {} }
+  })
+  console.log('Arkadaş kodun    →  ' + core.myCode)
+}
 
 // ---- web arayüzü (sadece localhost) ----
 const app = express()
 app.use(express.static(path.join(__dirname, 'public')))
+
+// ---- WS oturum token'ı ----
+// Origin kontrolü tek başına yetmez: Origin başlığı olmayan istemciler (curl,
+// başka bir yerel süreç, WebSocket kütüphaneleri) serbestçe bağlanıp
+// {t:'export'} ile kimlik seed'ini çekebilirdi. Her açılışta rastgele bir
+// token üretilir; arayüz /token'dan alır, WS el sıkışmasında sunar.
+// /token yanıtı CORS başlığı taşımadığından evil.com bu değeri OKUYAMAZ
+// (same-origin policy); Sec-Fetch-Site kontrolü de tarayıcı içi cross-site
+// istekleri ayrıca keser.
+const WS_TOKEN = crypto.randomBytes(32).toString('hex')
+function tokenOk (t) {
+  const a = Buffer.from(String(t || ''))
+  const b = Buffer.from(WS_TOKEN)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:' + PORT, 'http://localhost:' + PORT])
+app.get('/token', (req, res) => {
+  const origin = req.headers.origin
+  const site = req.headers['sec-fetch-site']
+  if (origin && !ALLOWED_ORIGINS.has(origin)) return res.status(403).end()
+  if (site && site !== 'same-origin' && site !== 'none') return res.status(403).end()
+  res.setHeader('Cache-Control', 'no-store')
+  res.type('text/plain').send(WS_TOKEN)
+})
 // Karşıdan gelen dosyanın MIME'ı gönderenin beyanı — körü körüne güvenilmez.
 // Yalnız bilinen zararsız türler tarayıcıda açılır (inline); geri kalan her şey
 // (text/html, image/svg+xml dahil — ikisi de script çalıştırabilir) indirme
@@ -62,13 +100,18 @@ const INLINE_MIME = new Set([
   'application/pdf'
 ])
 app.get('/files/:fid', (req, res) => {
+  if (!core) return res.status(404).end() // kasa kilitli
   const meta = core.filesIdx()[req.params.fid]
   if (!meta || !/^[0-9a-f-]{36}$/.test(req.params.fid)) return res.status(404).end()
+  // Blob diskte şifreli olabilir → sendFile yerine store üzerinden oku
+  // (store anahtar takılıysa şeffaf çözer)
+  const buf = store.readFileBlob(req.params.fid)
+  if (!buf) return res.status(404).end()
   const inline = INLINE_MIME.has(String(meta.mime || ''))
   res.setHeader('Content-Type', inline ? meta.mime : 'application/octet-stream')
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Content-Disposition', (inline ? 'inline' : 'attachment') + '; filename="' + encodeURIComponent(meta.fname) + '"')
-  res.sendFile(store.filePath(req.params.fid))
+  res.send(buf)
 })
 
 // ---- link önizleme ----
@@ -147,26 +190,81 @@ app.get('/preview', async (req, res) => {
 })
 
 const server = http.createServer(app)
-// WS origin allowlist: kötü niyetli bir web sayfası (evil.com) tarayıcıdan
-// ws://127.0.0.1:PORT'a bağlanıp {t:'export'} ile kimlik seed'ini çalamasın
-// (cross-site WebSocket hijacking). Tarayıcı Origin başlığını JS ile taklit
-// edemez; origin'siz istekler (test sürücüsü, bare) localhost'ta kabul edilir.
-const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:' + PORT, 'http://localhost:' + PORT])
+// WS güvenliği, iki katman:
+//  1. Origin allowlist — kötü niyetli bir web sayfası (evil.com) tarayıcıdan
+//     ws://127.0.0.1:PORT'a bağlanamasın (cross-site WebSocket hijacking).
+//     Tarayıcı Origin başlığını JS ile taklit edemez.
+//  2. Oturum token'ı — Origin göndermeyen istemciler (curl, yerel süreçler,
+//     WS kütüphaneleri) için. Token, Sec-WebSocket-Protocol içinde
+//     "turkuaz.tok.<hex>" olarak taşınır (URL'de taşınmaz: query string
+//     loglara/geçmişe sızabilir). Token'sız veya yanlış token'lı hiçbir
+//     bağlantı kabul edilmez.
+const WS_PROTO = 'turkuaz.v1'
+const WS_TOK_PREFIX = 'turkuaz.tok.'
 const wss = new WebSocketServer({
   server,
   maxPayload: 16 * 1024 * 1024,
+  handleProtocols: (protocols) => protocols.has(WS_PROTO) ? WS_PROTO : false,
   verifyClient: (info) => {
     const origin = info.origin || (info.req && info.req.headers && info.req.headers.origin)
-    return !origin || ALLOWED_ORIGINS.has(origin)
+    if (origin && !ALLOWED_ORIGINS.has(origin)) return false
+    const raw = String((info.req && info.req.headers && info.req.headers['sec-websocket-protocol']) || '')
+    const offered = raw.split(',').map(s => s.trim())
+    const tok = offered.find(p => p.startsWith(WS_TOK_PREFIX))
+    return !!tok && tokenOk(tok.slice(WS_TOK_PREFIX.length))
   }
 })
 const clients = new Set()
 
-// çekirdekten gelen her yayını bağlı tüm arayüzlere ilet
-core.onUI((obj) => {
-  const s = JSON.stringify(obj)
-  for (const c of clients) { try { c.send(s) } catch {} }
-})
+// ---- kilit / parola yönetimi ----
+// Bu mesajlar çekirdeğe gitmez; kasa (vault) sunucu katmanının işi.
+//  unlock   {pass}        → kasayı aç, çekirdeği başlat
+//  set-pass {pass, old}   → kasa kur / parola değiştir / (pass boşsa) kaldır
+function handleVaultMsg (m, reply) {
+  if (m.t === 'unlock') {
+    if (core) return reply({ t: 'unlock-res', ok: true })
+    const key = vaultLib.openVault(DATA, String(m.pass || ''))
+    if (!key) return reply({ t: 'unlock-res', ok: false })
+    store.setKey(key)
+    startCore()
+    reply({ t: 'unlock-res', ok: true })
+    // kilit ekranında bekleyen TÜM pencereler taze state alsın
+    const s = JSON.stringify(core.stateObj())
+    for (const c of clients) { try { c.send(s) } catch {} }
+    return
+  }
+  if (m.t === 'vault-info') {
+    return reply({ t: 'vault-info', protected: vaultLib.hasVault(DATA) })
+  }
+  if (m.t === 'set-pass') {
+    if (!core) return reply({ t: 'pass-res', ok: false, err: 'Önce kilidi aç' })
+    const pass = String(m.pass || '')
+    try {
+      if (vaultLib.hasVault(DATA)) {
+        // değişiklik/kaldırma için mevcut parola şart
+        const oldKey = vaultLib.openVault(DATA, String(m.old || ''))
+        if (!oldKey) return reply({ t: 'pass-res', ok: false, err: 'Mevcut parola yanlış' })
+        if (!pass) {
+          store.migrate(null)
+          vaultLib.removeVault(DATA)
+          return reply({ t: 'pass-res', ok: true, protected: false })
+        }
+        const newKey = vaultLib.createVault(DATA, pass)
+        store.migrate(newKey)
+        return reply({ t: 'pass-res', ok: true, protected: true })
+      }
+      if (!pass) return reply({ t: 'pass-res', ok: false, err: 'Parola boş olamaz' })
+      if (pass.length < 6) return reply({ t: 'pass-res', ok: false, err: 'Parola en az 6 karakter olmalı' })
+      const key = vaultLib.createVault(DATA, pass)
+      store.migrate(key)
+      return reply({ t: 'pass-res', ok: true, protected: true })
+    } catch (e) {
+      console.error('set-pass hata:', (e && e.message) || e)
+      return reply({ t: 'pass-res', ok: false, err: 'İşlem başarısız' })
+    }
+  }
+  return false // bu mesaj kasa ile ilgili değil
+}
 
 wss.on('connection', (ws) => {
   clients.add(ws)
@@ -175,20 +273,26 @@ wss.on('connection', (ws) => {
   ws.on('message', (data) => {
     let m
     try { m = JSON.parse(data.toString()) } catch { return }
-    // Bozuk disk/dolu disk gibi hatalar tek mesajda uygulamayı düşürmesin
-    try { core.handleUI(m, reply) } catch (e) { console.error('handleUI hata:', (e && e.message) || e) }
+    try {
+      if (handleVaultMsg(m, reply) !== false) return
+      if (!core) return reply({ t: 'locked' }) // kilitliyken çekirdek mesajı yok
+      core.handleUI(m, reply)
+    } catch (e) { console.error('handleUI hata:', (e && e.message) || e) }
   })
-  ws.send(JSON.stringify(core.stateObj()))
+  ws.send(JSON.stringify(core ? core.stateObj() : { t: 'locked' }))
 })
+
+// Kasa yoksa hemen başlat; varsa parola bekle (kilit ekranı)
+if (!vaultLib.hasVault(DATA)) startCore()
+else console.log('Veri kasası kilitli — arayüzden parolayla açılacak')
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('Turkuaz hazır    →  http://localhost:' + PORT)
-  console.log('Arkadaş kodun    →  ' + core.myCode)
   console.log('Veri klasörü     →  ' + DATA)
 })
 
 process.on('SIGINT', async () => {
   console.log('\nkapanıyor...')
-  await core.destroy()
+  if (core) await core.destroy()
   process.exit(0)
 })

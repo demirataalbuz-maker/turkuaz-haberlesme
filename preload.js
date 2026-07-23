@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('turkuazDesktop', {
     notifyIncoming: (name) => ipcRenderer.invoke('turkuaz-call-notify', name),
     clearIncoming: () => ipcRenderer.invoke('turkuaz-call-clear')
   },
+  remote: {
+    available: () => ipcRenderer.invoke('turkuaz-remote-available'),
+    begin: () => ipcRenderer.invoke('turkuaz-remote-begin'),
+    end: () => ipcRenderer.invoke('turkuaz-remote-end'),
+    input: (ev) => ipcRenderer.invoke('turkuaz-remote-input', ev)
+  },
   shortcuts: {
     isGlobalMuteActive: () => ipcRenderer.invoke('turkuaz-shortcut-global-mute-active'),
     onToggleMute: (callback) => {

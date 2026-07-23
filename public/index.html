@@ -125,6 +125,15 @@
 
     <div id="messages"></div>
     <div id="typing-bar"></div>
+
+    <!-- Gönderilmeyi bekleyen dosyalar (sürükle-bırak / seçim sonrası önizleme) -->
+    <div id="attach-tray" class="hidden">
+      <div id="attach-list"></div>
+      <div class="attach-actions">
+        <button id="btn-attach-cancel">Vazgeç</button>
+        <button class="primary" id="btn-attach-send">Gönder</button>
+      </div>
+    </div>
     <div id="reply-bar" class="hidden"></div>
     <div id="composer">
       <button id="btn-attach" title="Dosya gönder">＋</button>
@@ -275,10 +284,44 @@
   </div>
 </div>
 
-<input type="file" id="file-input" hidden>
+<!-- Klavye kısayolları -->
+<div class="modal-back hidden" id="modal-shortcuts" role="dialog" aria-modal="true" aria-label="Klavye kısayolları" aria-hidden="true">
+  <div class="modal">
+    <h3>⌨️ Klavye kısayolları</h3>
+    <div class="sc-list">
+      <div class="sc-row"><span>Mesajlarda ara</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd></span></div>
+      <div class="sc-row"><span>Mesaj gönder</span><span><kbd>Enter</kbd></span></div>
+      <div class="sc-row"><span>Yeni satır</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd></span></div>
+      <div class="sc-row"><span>Bahsetme önerisi</span><span><kbd>@</kbd> sonra <kbd>↑</kbd>/<kbd>↓</kbd> ve <kbd>Enter</kbd></span></div>
+      <div class="sc-row"><span>Mikrofonu sustur/aç (seslideyken)</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span></div>
+      <div class="sc-row"><span>Pencereyi / menüyü kapat</span><span><kbd>Esc</kbd></span></div>
+      <div class="sc-row"><span>Bu listeyi aç</span><span><kbd>?</kbd></span></div>
+    </div>
+    <div class="modal-btns">
+      <button id="btn-close-shortcuts">Kapat</button>
+    </div>
+  </div>
+</div>
+
+<!-- Kilit ekranı: disk kasası (parolalı şifreleme) açılana kadar tüm arayüzü örter -->
+<div id="lock-screen" class="hidden" role="dialog" aria-modal="true" aria-label="Kilidi aç">
+  <div class="lock-card">
+    <div class="lock-logo">🔐</div>
+    <h2>Turkuaz kilitli</h2>
+    <p>Mesajların diskte şifreli. Devam etmek için kasa parolanı gir.</p>
+    <form id="lock-form">
+      <input type="password" id="lock-pass" placeholder="Parola" autocomplete="current-password" aria-label="Kasa parolası">
+      <button type="submit" class="primary" id="lock-btn">Kilidi aç</button>
+    </form>
+    <div id="lock-err" class="lock-err" aria-live="polite"></div>
+  </div>
+</div>
+
+<input type="file" id="file-input" multiple hidden>
 <script src="transport.js"></script>
 <script src="app.js"></script>
 <script src="voice.js"></script>
+<script src="remotectrl.js"></script>
 <script src="soundboard.js"></script>
 <script src="games.js"></script>
 <script src="settings.js"></script>

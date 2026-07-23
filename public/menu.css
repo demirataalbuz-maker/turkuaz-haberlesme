@@ -678,3 +678,23 @@ button.screen-opt { padding: 0; color: var(--tx); text-align: left; font: inheri
 .vc-member .avatar { width: 24px; height: 24px; min-width: 24px; font-size: 12px; }
 .vc-mname { flex: 1; font-size: 13px; color: var(--tx2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-mute { font-size: 11px; opacity: .85; }
+
+/* Kasa (disk şifreleme) girişleri */
+.set-vault-inp {
+  flex: 1; min-width: 120px;
+  padding: 9px 11px; border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--bg0);
+  color: var(--tx); font-size: 14px;
+}
+.set-vault-inp:focus { outline: 2px solid var(--tq); border-color: transparent; }
+.set-btn.danger { color: var(--danger); border-color: var(--danger); }
+
+/* Vurgu rengi seçici */
+.set-accents { display: flex; gap: 10px; flex-wrap: wrap; }
+.set-accent {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer; padding: 0;
+}
+.set-accent.active { border-color: var(--tx); box-shadow: 0 0 0 2px var(--bg0); }
+.set-accent:focus-visible { outline: 2px solid var(--tx); outline-offset: 2px; }

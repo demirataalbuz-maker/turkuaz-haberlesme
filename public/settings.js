@@ -473,8 +473,79 @@
   }
 
   // ---------- Gizlilik ----------
+  // Kasa (disk şifreleme) durumu: sunucudan gelir (tq-vault-info olayı app.js'ten)
+  let vaultProtected = null
+  window.addEventListener('tq-vault-info', (e) => {
+    vaultProtected = !!e.detail.protected
+    if (cur === 'privacy' && !$('settings').classList.contains('hidden')) renderPanel()
+  })
+  window.addEventListener('tq-pass-res', (e) => {
+    const m = e.detail || {}
+    if (m.ok) {
+      vaultProtected = !!m.protected
+      if (typeof toast === 'function') toast(m.protected ? 'Disk şifreleme açık — veriler artık şifreli yazılıyor.' : 'Disk şifreleme kapatıldı.', 'success')
+    } else if (typeof toast === 'function') toast(m.err || 'Parola işlemi başarısız.', 'error')
+    if (cur === 'privacy' && !$('settings').classList.contains('hidden')) renderPanel()
+  })
+
+  function vaultSection (p) {
+    const g = group('DİSK ŞİFRELEME (KASA)')
+    const note = document.createElement('div'); note.className = 'set-note-box'
+    if (vaultProtected === null) {
+      note.textContent = 'Durum kontrol ediliyor…'
+      g.appendChild(note); p.appendChild(g)
+      send({ t: 'vault-info' })
+      return
+    }
+    note.innerHTML = vaultProtected
+      ? 'Mesajların, kimliğin ve dosyaların diskte <b>şifreli</b> (Argon2id + XSalsa20-Poly1305). Uygulama her açılışta parola ister. <b>Parolayı unutursan veriler kurtarılamaz.</b>'
+      : 'Verilerin şu an diskte <b>düz metin</b>. Parola belirlersen her şey şifrelenir; bilgisayarına fiziksel erişimi olan biri mesajlarını okuyamaz.'
+    g.appendChild(note)
+
+    const mkInput = (ph, ac) => {
+      const i = document.createElement('input')
+      i.type = 'password'; i.placeholder = ph; i.className = 'set-vault-inp'
+      i.autocomplete = ac || 'new-password'
+      return i
+    }
+    if (!vaultProtected) {
+      const inp = mkInput('Yeni parola (en az 6 karakter)')
+      const btn = document.createElement('button'); btn.className = 'set-btn'; btn.textContent = 'Şifrelemeyi aç'
+      btn.onclick = () => {
+        if ((inp.value || '').length < 6) return toast('Parola en az 6 karakter olmalı.', 'error')
+        btn.disabled = true; btn.textContent = 'Şifreleniyor…'
+        send({ t: 'set-pass', pass: inp.value })
+      }
+      const r = document.createElement('div'); r.className = 'set-coderow'
+      r.append(inp, btn); g.appendChild(r)
+    } else {
+      const old1 = mkInput('Mevcut parola', 'current-password')
+      const neu = mkInput('Yeni parola')
+      const chg = document.createElement('button'); chg.className = 'set-btn'; chg.textContent = 'Parolayı değiştir'
+      chg.onclick = () => {
+        if ((neu.value || '').length < 6) return toast('Yeni parola en az 6 karakter olmalı.', 'error')
+        chg.disabled = true; chg.textContent = 'Değiştiriliyor…'
+        send({ t: 'set-pass', old: old1.value, pass: neu.value })
+      }
+      const r1 = document.createElement('div'); r1.className = 'set-coderow'
+      r1.append(old1, neu, chg); g.appendChild(r1)
+
+      const old2 = mkInput('Mevcut parola', 'current-password')
+      const off = document.createElement('button'); off.className = 'set-btn danger'; off.textContent = 'Şifrelemeyi kapat'
+      off.onclick = () => {
+        if (!confirm('Disk şifreleme kapatılsın mı? Verilerin düz metne çevrilecek.')) return
+        off.disabled = true; off.textContent = 'Çözülüyor…'
+        send({ t: 'set-pass', old: old2.value, pass: '' })
+      }
+      const r2 = document.createElement('div'); r2.className = 'set-coderow'
+      r2.append(old2, off); g.appendChild(r2)
+    }
+    p.appendChild(g)
+  }
+
   function renderPrivacy (p) {
     p.innerHTML = '<h2>Gizlilik</h2>'
+    vaultSection(p)
     const g = group('BAĞLANTI (ICE / TURN)')
     const ice = Array.isArray(state.ice) ? state.ice : []
     const turn = ice.filter(s => JSON.stringify(s.urls).includes('turn')).length
@@ -544,10 +615,34 @@
   }
 
   // ---------- Görünüm ----------
+  // Vurgu renkleri: --tq (ana), --tq-soft (arka plan tonu), --grad (degrade).
+  // "turkuaz" varsayılan — CSS'teki değerlere döner (özellik temizlenir).
+  const ACCENTS = [
+    { id: 'turkuaz', label: 'Turkuaz', tq: '#2dd4bf', grad: 'linear-gradient(135deg, #5eead4, #0ea5e9)' },
+    { id: 'mavi', label: 'Mavi', tq: '#38bdf8', grad: 'linear-gradient(135deg, #7dd3fc, #2563eb)' },
+    { id: 'mor', label: 'Mor', tq: '#a78bfa', grad: 'linear-gradient(135deg, #c4b5fd, #7c3aed)' },
+    { id: 'yesil', label: 'Yeşil', tq: '#4ade80', grad: 'linear-gradient(135deg, #86efac, #059669)' },
+    { id: 'turuncu', label: 'Turuncu', tq: '#fb923c', grad: 'linear-gradient(135deg, #fdba74, #ea580c)' },
+    { id: 'pembe', label: 'Pembe', tq: '#f472b6', grad: 'linear-gradient(135deg, #f9a8d4, #db2777)' }
+  ]
+  function hexToSoft (hex) {
+    const n = parseInt(hex.slice(1), 16)
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, .14)`
+  }
   function applyAppearance () {
     const r = document.documentElement
     r.setAttribute('data-theme', settings.theme || 'dark')
     r.setAttribute('data-density', settings.density || 'cozy')
+    const acc = ACCENTS.find(a => a.id === settings.accent)
+    if (acc && acc.id !== 'turkuaz') {
+      r.style.setProperty('--tq', acc.tq)
+      r.style.setProperty('--tq-soft', hexToSoft(acc.tq))
+      r.style.setProperty('--grad', acc.grad)
+    } else {
+      r.style.removeProperty('--tq')
+      r.style.removeProperty('--tq-soft')
+      r.style.removeProperty('--grad')
+    }
   }
   function renderAppearance (p) {
     p.innerHTML = '<h2>Görünüm</h2>'
@@ -558,6 +653,19 @@
     gt.appendChild(row('Mesaj yoğunluğu',
       selectEl([{ value: 'cozy', label: 'Rahat' }, { value: 'compact', label: 'Sıkışık' }], settings.density || 'cozy',
         v => { TurkuazSettings.set('density', v); applyAppearance() })))
+    // Vurgu rengi seçici (uygulama adına yakışır 😄)
+    const accWrap = document.createElement('div'); accWrap.className = 'set-accents'
+    for (const a of ACCENTS) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'set-accent' + ((settings.accent || 'turkuaz') === a.id ? ' active' : '')
+      b.style.background = a.grad
+      b.title = a.label
+      b.setAttribute('aria-label', 'Vurgu rengi: ' + a.label)
+      b.onclick = () => { TurkuazSettings.set('accent', a.id); applyAppearance(); renderPanel() }
+      accWrap.appendChild(b)
+    }
+    gt.appendChild(row('Vurgu rengi', accWrap, 'Düğme, bağlantı ve vurgu renklerini değiştirir.'))
     p.appendChild(gt)
     const gn = group('BİLDİRİMLER')
     const sw = document.createElement('label'); sw.className = 'set-switch'

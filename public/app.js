@@ -15,6 +15,17 @@ const unread = loadLSMap('turkuaz.unread')               // key -> sayı (dm: co
 const unreadMention = loadLSMap('turkuaz.unreadMention') // key -> beni anan mesaj sayısı (oda)
 let unreadMarker = null          // { key, count, id? } — sohbet açılınca "YENİ" ayracının yeri
 const typing = {}                // key -> { name, until }
+// Sessize alınan sohbetler: conv ('dm-<code>' | 'room-<topic>') -> 1.
+// Susturulan sohbet ses çalmaz ve masaüstü bildirimi göstermez; okunmamış
+// rozeti yine artar (görsel takip kalsın).
+const mutedConvs = loadLSMap('turkuaz.muted')
+function isMuted (conv) { return !!mutedConvs[conv] }
+function toggleMute (conv) {
+  if (mutedConvs[conv]) delete mutedConvs[conv]
+  else mutedConvs[conv] = 1
+  try { localStorage.setItem('turkuaz.muted', JSON.stringify(mutedConvs)) } catch {}
+  renderChatHead()
+}
 
 const $ = (id) => document.getElementById(id)
 const QUICK_EMOJI = ['👍', '❤️', '😂', '🔥', '😮']
@@ -28,8 +39,13 @@ Transport.onMessage((m) => {
         state = m
         if (!gotState && window.TurkuazNative) { try { localStorage.setItem('tq.bootOk', 'ok') } catch {} }
         gotState = true
+        hideLockScreen()
         render()
         break
+      case 'locked': showLockScreen(); break
+      case 'unlock-res': onUnlockRes(m); break
+      case 'vault-info': window.dispatchEvent(new CustomEvent('tq-vault-info', { detail: m })); break
+      case 'pass-res': window.dispatchEvent(new CustomEvent('tq-pass-res', { detail: m })); break
       case 'log': onCoreLog(m); break
       case 'history':
         histories[m.conv] = m.msgs
@@ -46,6 +62,13 @@ Transport.onMessage((m) => {
         break
       }
       case 'typing': onTyping(m.conv, m.name); break
+      case 'seen': { // karşı taraf mesajlarımızı gördü (✓✓)
+        const scode = m.conv.startsWith('dm-') ? m.conv.slice(3) : null
+        const sf = scode && state.friends.find(f => f.code === scode)
+        if (sf && !(sf.seenUpTo >= m.upTo)) sf.seenUpTo = m.upTo
+        if (isActiveConv(m.conv)) renderMessages()
+        break
+      }
       case 'notify': onNotify(m); break
       case 'file-ready': if (activeConv) renderMessages(); break
       case 'file-data': onFileData(m); break
@@ -61,6 +84,49 @@ Transport.onMessage((m) => {
     }
 })
 // send() ve Transport transport.js'te tanımlı (window.send / window.Transport).
+
+// ---- Kilit ekranı (disk kasası) ----
+// Sunucu kasa kilitliyken 'locked' yollar; doğru parola ('unlock') gelene
+// kadar state gelmez. state gelince ekran kapanır (yukarıdaki case 'state').
+let unlockBusy = false
+function showLockScreen () {
+  const el = $('lock-screen')
+  if (!el || !el.classList.contains('hidden')) return
+  el.classList.remove('hidden')
+  setTimeout(() => $('lock-pass')?.focus(), 0)
+}
+function hideLockScreen () {
+  const el = $('lock-screen')
+  if (el && !el.classList.contains('hidden')) {
+    el.classList.add('hidden')
+    const err = $('lock-err'); if (err) err.textContent = ''
+    const inp = $('lock-pass'); if (inp) inp.value = ''
+  }
+  unlockBusy = false
+}
+function onUnlockRes (m) {
+  unlockBusy = false
+  const btn = $('lock-btn'); if (btn) { btn.disabled = false; btn.textContent = 'Kilidi aç' }
+  if (!m.ok) {
+    const err = $('lock-err'); if (err) err.textContent = 'Parola yanlış — tekrar dene.'
+    const inp = $('lock-pass'); if (inp) { inp.value = ''; inp.focus() }
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const form = $('lock-form')
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault()
+      if (unlockBusy) return
+      const pass = $('lock-pass')?.value || ''
+      if (!pass) return
+      unlockBusy = true
+      const err = $('lock-err'); if (err) err.textContent = ''
+      const btn = $('lock-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Açılıyor…' }
+      send({ t: 'unlock', pass })
+    })
+  }
+})
 
 let transportStatus = 'connecting'
 function toast (message, kind = 'info', timeout = 3200) {
@@ -164,13 +230,31 @@ function pingSound () {
   } catch {}
 }
 
+// Normal mesaj bildirimi (tek yumuşak ton — bahsetme ping'inden daha sakin)
+function msgSound () {
+  if (window.TurkuazSettings && TurkuazSettings.get().notif === false) return
+  try {
+    _pingCtx = _pingCtx || new (window.AudioContext || window.webkitAudioContext)()
+    const c = _pingCtx; const t = c.currentTime
+    const o = c.createOscillator(); const g = c.createGain()
+    o.frequency.value = 660
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.06, t + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18)
+    o.connect(g).connect(c.destination)
+    o.start(t); o.stop(t + 0.2)
+  } catch {}
+}
+
 function onIncomingMsg (m) {
   if (!histories[m.conv]) histories[m.conv] = []
   histories[m.conv].push(m.msg)
   const mine = m.msg.from === state.me.code
-  if (!mine && mentionsMe(m.msg.text)) pingSound()
+  const muted = isMuted(m.conv)
+  if (!mine && !muted && mentionsMe(m.msg.text)) pingSound()
   const visible = document.visibilityState === 'visible' && document.hasFocus() && isActiveConv(m.conv) &&
     (!m.conv.startsWith('room-') || (m.msg.ch || 'genel') === activeCh(m.conv.slice(5)))
+  if (!mine && !muted && !visible && !mentionsMe(m.msg.text)) msgSound()
   if (visible) renderMessages()
   else if (!mine) {
     const k = unreadKey(m.conv, m.msg.ch)
@@ -236,6 +320,7 @@ setInterval(renderTyping, 1000)
 
 function onNotify (m) {
   if (document.hasFocus()) return
+  if (m.conv && isMuted(m.conv)) return // sohbet sessize alınmış
   if (window.TurkuazSettings && TurkuazSettings.get().notif === false) return
   if (Notification.permission !== 'granted') return
   const n = new Notification(m.title, { body: m.body, silent: false })
@@ -525,6 +610,14 @@ function renderChatHead () {
     sub.textContent = f.online
       ? 'çevrimiçi — direkt P2P bağlantı' + (f.statusText ? ' · ' + f.statusText : '')
       : (f.status === 'pending-out' ? 'istek bekliyor — karşı tarafın da seni eklemesi lazım' : 'çevrimdışı — mesajlar bağlanınca iletilir')
+    const muConv = 'dm-' + f.code
+    const mu = document.createElement('button')
+    mu.className = 'action-mute' + (isMuted(muConv) ? ' muted' : '')
+    mu.textContent = isMuted(muConv) ? '🔕' : '🔔'
+    mu.title = isMuted(muConv) ? 'Bildirimler kapalı — açmak için tıkla' : 'Bu sohbeti sessize al'
+    mu.setAttribute('aria-label', mu.title)
+    mu.onclick = () => toggleMute(muConv)
+    actions.appendChild(mu)
     const call = document.createElement('button')
     call.className = 'action-call'
     call.textContent = '📞 Ara'
@@ -554,6 +647,14 @@ function renderChatHead () {
     if (!r) { activeConv = null; return renderChatHead() }
     title.textContent = '# ' + activeCh(r.topic) // oda adı sidebar'da; başlıkta aktif kanal
     sub.textContent = r.name + ' · ' + r.online + ' çevrimiçi' + (r.isOwner ? ' · sahibisin' : '')
+    const muConv = 'room-' + r.topic
+    const mu = document.createElement('button')
+    mu.className = 'action-mute' + (isMuted(muConv) ? ' muted' : '')
+    mu.textContent = isMuted(muConv) ? '🔕' : '🔔'
+    mu.title = isMuted(muConv) ? 'Bildirimler kapalı — açmak için tıkla' : 'Bu odayı sessize al'
+    mu.setAttribute('aria-label', mu.title)
+    mu.onclick = () => toggleMute(muConv)
+    actions.appendChild(mu)
     const members = document.createElement('button')
     members.className = 'members-toggle'
     members.textContent = '👥 Üyeler'
@@ -739,6 +840,10 @@ function renderMessages () {
   const room = isRoom ? state.rooms.find(x => x.topic === activeConv.topic) : null
   if (isRoom) msgs = msgs.filter(m => (m.ch || 'genel') === activeCh(activeConv.topic))
   const pendingIds = activeConv.type === 'dm' ? new Set(state.pending[activeConv.code] || []) : new Set()
+  // Okundu bilgisi: karşı tarafın gördüğü en yeni mesaj zamanı (✓ iletildi / ✓✓ görüldü)
+  const friendSeenUpTo = activeConv.type === 'dm'
+    ? ((state.friends.find(f => f.code === activeConv.code) || {}).seenUpTo || 0)
+    : 0
 
   // "YENİ" ayracı: açılışta yakalanan okunmamış sayısından yerini bul,
   // ilk çizimde mesaj id'sine sabitle (yeni mesaj gelince kaymasın)
@@ -797,9 +902,16 @@ function renderMessages () {
       if (m.pinned) body += '<div class="msg-pinned">📌 sabitlendi</div>'
       if (m.re) body += `<div class="msg-reply">↩ <b>${esc(m.re.name || 'anon')}</b>: <span>${esc(m.re.text || '')}</span></div>`
       if (m.fw) body += `<div class="msg-fw">↪ iletildi · aslı: <b>${esc(m.fw.name)}</b></div>`
-      if (m.text) body += `<div class="msg-text">${fmt(m.text)}${m.edited ? ' <span class="msg-edited">(düzenlendi)</span>' : ''}${pending ? '<span class="msg-pending-mark">⏳</span>' : ''}</div>`
+      // Kendi DM mesajlarımızda durum işareti: ⏳ sırada / ✓ iletildi / ✓✓ görüldü
+      const mine = !isRoom && m.from === state.me.code
+      const seenMark = mine && !pending
+        ? (friendSeenUpTo >= m.ts
+            ? '<span class="msg-seen-mark seen" title="Görüldü">✓✓</span>'
+            : '<span class="msg-seen-mark" title="İletildi">✓</span>')
+        : ''
+      if (m.text) body += `<div class="msg-text">${fmt(m.text)}${m.edited ? ' <span class="msg-edited">(düzenlendi)</span>' : ''}${pending ? '<span class="msg-pending-mark">⏳</span>' : seenMark}</div>`
       if (m.prev) body += prevHTML(m.prev)
-      if (m.file) body += fileHTML(m)
+      if (m.file) body += fileHTML(m) + (!m.text ? (pending ? '<div class="msg-status"><span class="msg-pending-mark">⏳</span></div>' : (seenMark ? '<div class="msg-status">' + seenMark + '</div>' : '')) : '')
     }
     const reacts = reactsHTML(m)
 
@@ -815,6 +927,16 @@ function renderMessages () {
     lastFrom = m.from; lastTs = m.ts
   }
   if (!msgs.length) box.innerHTML = '<div class="empty-hint">Henüz mesaj yok — ilk mesajı sen at 🚀</div>'
+  // Görüldü bilgisi: DM ekranda ve pencere görünürken karşıya "buraya kadar
+  // gördüm" bildir (çekirdek tekrarları eler, karşı offline'sa sessizce düşer)
+  if (activeConv.type === 'dm' && msgs.length && document.visibilityState === 'visible') {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].from !== state.me.code && !msgs[i].call) {
+        send({ t: 'mark-seen', code: activeConv.code, upTo: msgs[i].ts })
+        break
+      }
+    }
+  }
   scrollBottom(box)
   requestBridgeFiles(box)
 }
@@ -1548,9 +1670,8 @@ $('btn-close-forward').onclick = () => hideModal('modal-forward')
 // dosya gönderme
 $('btn-attach').onclick = () => { if (activeConv) $('file-input').click() }
 $('file-input').onchange = () => {
-  const f = $('file-input').files[0]
+  queueFiles($('file-input').files)
   $('file-input').value = ''
-  if (f) sendFileToActive(f)
 }
 function sendFileToActive (f) {
   if (!activeConv) return
@@ -1563,6 +1684,61 @@ function sendFileToActive (f) {
     else send({ ...base, room: activeConv.topic, ch: activeCh(activeConv.topic) })
   }
   rd.readAsDataURL(f)
+}
+
+// ---- gönderim öncesi dosya kuyruğu (çoklu seçim / sürükle-bırak + önizleme) ----
+let attachQueue = [] // { file, url? (görsel önizleme) }
+function fmtSize (n) {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  if (n >= 1024) return Math.round(n / 1024) + ' KB'
+  return n + ' B'
+}
+function queueFiles (files) {
+  if (!activeConv || !files || !files.length) return
+  for (const f of files) {
+    if (f.size > 8 * 1024 * 1024) { toast('"' + f.name + '" 8 MB\'ı geçiyor — atlandı.', 'error'); continue }
+    if (attachQueue.length >= 10) { toast('Tek seferde en fazla 10 dosya.', 'error'); break }
+    const item = { file: f, url: /^image\//.test(f.type) ? URL.createObjectURL(f) : null }
+    attachQueue.push(item)
+  }
+  renderAttachTray()
+}
+function clearAttachQueue () {
+  for (const it of attachQueue) { if (it.url) URL.revokeObjectURL(it.url) }
+  attachQueue = []
+  renderAttachTray()
+}
+function renderAttachTray () {
+  const tray = $('attach-tray'); const list = $('attach-list')
+  if (!attachQueue.length) { tray.classList.add('hidden'); list.innerHTML = ''; return }
+  tray.classList.remove('hidden')
+  list.innerHTML = ''
+  attachQueue.forEach((it, i) => {
+    const chip = document.createElement('div')
+    chip.className = 'attach-chip'
+    chip.innerHTML = (it.url
+      ? `<img src="${it.url}" alt="">`
+      : '<span class="attach-ico">📎</span>') +
+      `<span class="attach-name" title="${esc(it.file.name)}">${esc(it.file.name)}</span>` +
+      `<span class="attach-size">${fmtSize(it.file.size)}</span>`
+    const x = document.createElement('button')
+    x.className = 'attach-x'; x.textContent = '✕'; x.title = 'Kaldır'
+    x.onclick = () => {
+      if (it.url) URL.revokeObjectURL(it.url)
+      attachQueue.splice(i, 1)
+      renderAttachTray()
+    }
+    chip.appendChild(x)
+    list.appendChild(chip)
+  })
+  $('btn-attach-send').textContent = 'Gönder (' + attachQueue.length + ')'
+}
+$('btn-attach-cancel').onclick = clearAttachQueue
+$('btn-attach-send').onclick = () => {
+  const items = attachQueue.slice()
+  clearAttachQueue()
+  for (const it of items) sendFileToActive(it.file)
+  if (items.length) toast(items.length + ' dosya gönderiliyor…', 'info')
 }
 // ---- sesli mesaj ----
 // 🎤 tıkla → kayıt başlar (buton kırmızı, süre sayar); tekrar tıkla → gönderilir;
@@ -1638,11 +1814,14 @@ $('btn-voicemsg').onclick = async () => {
   if (window.toast) toast('Kayıt başladı — 🎤 tekrar tıkla: gönder · Esc: iptal', 'info', 3500)
 }
 
-$('messages').addEventListener('dragover', e => e.preventDefault())
+// Sürükle-bırak: birden fazla dosya desteklenir; direkt gönderilmez,
+// önce composer üstündeki tepside önizlenir (attach-tray)
+$('messages').addEventListener('dragover', e => { e.preventDefault(); $('messages').classList.add('drop-hint') })
+$('messages').addEventListener('dragleave', () => $('messages').classList.remove('drop-hint'))
 $('messages').addEventListener('drop', e => {
   e.preventDefault()
-  const f = e.dataTransfer.files && e.dataTransfer.files[0]
-  if (f) sendFileToActive(f)
+  $('messages').classList.remove('drop-hint')
+  queueFiles(e.dataTransfer.files)
 })
 
 // emoji seçici
@@ -1726,6 +1905,17 @@ $('btn-do-import').onclick = () => {
     send({ t: 'import', data })
   } catch { alert('Taşıma metni çözümlenemedi.') }
 }
+
+// klavye kısayolları listesi: ? ile açılır (yazı alanlarında değilken)
+$('btn-close-shortcuts').onclick = () => hideModal('modal-shortcuts')
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
+  const t = e.target
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+  if (topVisibleModal() || !$('settings').classList.contains('hidden')) return
+  e.preventDefault()
+  showModal('modal-shortcuts', 'btn-close-shortcuts')
+})
 
 // bildirim izni (ilk tıklamada iste)
 document.addEventListener('click', function askNotif () {

@@ -49,20 +49,31 @@
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
       clearTimeout(retryTimer)
       reportStatus(retry ? 'reconnecting' : 'connecting')
-      try { ws = new WebSocket('ws://' + location.host) } catch { scheduleReconnect(); return }
-      ws.onmessage = (ev) => deliver(ev.data)
-      ws.onopen = () => {
-        retry = 0
-        reportStatus('online')
-        try { ws.send(JSON.stringify({ t: '__ready' })) } catch {}
-        flush()
-      }
-      ws.onerror = () => {}
-      ws.onclose = () => {
-        ws = null
-        reportStatus('offline')
-        scheduleReconnect()
-      }
+      // Önce oturum token'ını al (sunucu her açılışta yenisini üretir; cache
+      // yok — eski token'la bağlanmayı denemek boşa düşer). Token,
+      // Sec-WebSocket-Protocol ile taşınır; URL'e yazılmaz.
+      fetch('/token', { cache: 'no-store' })
+        .then((r) => { if (!r.ok) throw new Error('token'); return r.text() })
+        .then((tok) => {
+          if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+          try {
+            ws = new WebSocket('ws://' + location.host, ['turkuaz.v1', 'turkuaz.tok.' + tok.trim()])
+          } catch { scheduleReconnect(); return }
+          ws.onmessage = (ev) => deliver(ev.data)
+          ws.onopen = () => {
+            retry = 0
+            reportStatus('online')
+            try { ws.send(JSON.stringify({ t: '__ready' })) } catch {}
+            flush()
+          }
+          ws.onerror = () => {}
+          ws.onclose = () => {
+            ws = null
+            reportStatus('offline')
+            scheduleReconnect()
+          }
+        })
+        .catch(() => scheduleReconnect())
     }
     function scheduleReconnect () {
       if (retryTimer) return
