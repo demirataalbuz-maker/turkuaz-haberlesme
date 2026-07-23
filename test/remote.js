@@ -1,5 +1,7 @@
 // Uzaktan kontrol saf mantık testleri (native/DOM gerektirmeyen kısım).
-// nut-js sandbox'ta yok → modül "kullanılamaz" moduna düşmeli, çökmemeli.
+// nut-js opsiyonel bağımlılık olarak kurulu olabilir; testte native'i açıkça
+// devre dışı bırakıp "kullanılamaz" (nazik kapanma) yolunu doğruluyoruz.
+process.env.TURKUAZ_DISABLE_NATIVE_INPUT = '1'
 const assert = require('assert')
 const ri = require('../lib/remote-input')
 
@@ -10,7 +12,7 @@ function check (name, fn) {
 
 // 1) native yoksa nazik davran
 check('native yoksa available() false', () => {
-  // sandbox'ta @nut-tree-fork/nut-js kurulu değil
+  // TURKUAZ_DISABLE_NATIVE_INPUT ile native zorla kapalı
   assert.strictEqual(ri.available(), false)
 })
 check('native yoksa screenSize() null', async () => {
